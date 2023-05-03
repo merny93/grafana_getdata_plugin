@@ -117,13 +117,18 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	dataSlice := GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
 	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
 
+	//the excess sampleRate is just the ratio of extra time stamps
+	sampleRate := int(len(unixTimeSlice) / len(dataSlice))
+
+	var decimationFactor int = 1
+	var resultSize int = len(dataSlice)
 	//decimate the data
 	if query.MaxDataPoints < int64(len(dataSlice)) {
-		decimationFactor := int64(math.Ceil(float64(int64(len(dataSlice)) / query.MaxDataPoints)))
-		resultSize := int64(len(dataSlice) / int(decimationFactor))
+		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(query.MaxDataPoints)))
+		resultSize = int(len(dataSlice) / int(decimationFactor))
 		dataSlice_tmp := make([]float64, resultSize)
 
-		for i := 0; i < len(dataSlice); i++ {
+		for i := 0; i < resultSize*decimationFactor; i++ {
 			if i%int(decimationFactor) == 0 {
 				dataSlice_tmp[int(i/int(decimationFactor))] = dataSlice[i]
 			}
@@ -131,10 +136,10 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 		dataSlice = dataSlice_tmp
 	}
 	if len(dataSlice) < len(unixTimeSlice) {
-		decimationFactor := int(len(unixTimeSlice) / len(dataSlice))
-		resutSize := len(dataSlice)
-		unixTimeSlice_tmp := make([]float64, resutSize)
-		for i := 0; i < len(unixTimeSlice); i++ {
+		decimationFactor = decimationFactor * sampleRate
+		unixTimeSlice_tmp := make([]float64, resultSize)
+
+		for i := 0; i < resultSize*decimationFactor; i++ {
 			if i%int(decimationFactor) == 0 {
 				unixTimeSlice_tmp[int(i/int(decimationFactor))] = unixTimeSlice[i]
 			}
