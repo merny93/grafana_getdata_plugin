@@ -7,25 +7,37 @@ import { MyDataSourceOptions, MyQuery } from '../types';
 type Props = QueryEditorProps<DataSource, MyQuery, MyDataSourceOptions>;
 
 export function QueryEditor({ query, onChange, onRunQuery }: Props) {
-  const onQueryTextChange = (event: ChangeEvent<HTMLInputElement>) => {
-    onChange({ ...query, queryText: event.target.value });
-  };
-
-  const onConstantChange = (event: ChangeEvent<HTMLInputElement>) => {
-    onChange({ ...query, constant: parseFloat(event.target.value) });
+  const onStartIndexChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onChange({ ...query, startIndex: parseInt(event.target.value) });
     // executes the query
     onRunQuery();
   };
 
-  const { queryText, constant } = query;
+  const onFieldNameChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onChange({ ...query, fieldName: event.target.value });
+    // do not execute
+    // onRunQuery();
+  };
+
+  const onFrameNumberChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onChange({ ...query, frameNumber: parseInt(event.target.value) });
+    // executes the query
+    onRunQuery();
+  };
+  
+
+  const { fieldName, startIndex,frameNumber } = query;
 
   return (
     <div className="gf-form">
-      <InlineField label="Constant">
-        <Input onChange={onConstantChange} value={constant} width={8} type="number" step="0.1" />
+      <InlineField label="Field Name" labelWidth={16} tooltip="Name of field">
+        <Input onChange={onFieldNameChange} value={fieldName || ''} />
       </InlineField>
-      <InlineField label="Query Text" labelWidth={16} tooltip="Not used yet">
-        <Input onChange={onQueryTextChange} value={queryText || ''} />
+      <InlineField label="Start Index">
+        <Input onChange={onStartIndexChange} value={startIndex} width={8} type="number" step="1" />
+      </InlineField>
+      <InlineField label="number of frames">
+        <Input onChange={onFrameNumberChange} value={frameNumber} width={8} type="number" step="1" />
       </InlineField>
     </div>
   );

@@ -1,12 +1,15 @@
 import { DataQuery, DataSourceJsonData } from '@grafana/data';
 
 export interface MyQuery extends DataQuery {
-  queryText?: string;
-  constant: number;
+  fieldName: string;
+  startIndex: number;
+  frameNumber: number;
 }
 
 export const DEFAULT_QUERY: Partial<MyQuery> = {
-  constant: 6.5,
+  fieldName: "TIME",
+  startIndex: 0,
+  frameNumber: 1,
 };
 
 /**

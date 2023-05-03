@@ -51,3 +51,11 @@ func GD_getdata(field_name string, df *C.DIRFILE, first_frame, first_sample, num
 func GD_close(df *C.DIRFILE) {
 	C.gd_close(df)
 }
+
+func GD_framenum(df *C.DIRFILE, field_name string, value float64) float64 {
+	field_name_c := C.CString(field_name)
+	var index float64
+	index = float64(C.gd_framenum(df, field_name_c, C.double(value)))
+	C.free(unsafe.Pointer(field_name_c))
+	return index
+}

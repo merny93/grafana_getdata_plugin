@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -78,28 +79,57 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-type queryModel struct{}
+type QueryModel struct {
+	FieldName   string `json:"fieldName"`
+	StartIndex  int    `json:"startIndex"`
+	FrameNumber int    `json:"frameNumber"`
+}
 
 func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
+
+	//time lives in
+	//query
+	// query.TimeRange.From, query.TimeRange.To
+
 	var response backend.DataResponse
 
 	// Unmarshal the JSON into our queryModel.
-	var qm queryModel
+	var qm QueryModel
 
 	err := json.Unmarshal(query.JSON, &qm)
 	if err != nil {
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
+	//grab the starting time and the end time
+	//using the default TIME field here... might be wrong
+	startFrame := GD_framenum(d.df, "TIME", float64(query.TimeRange.From.Unix()))
+	endFrame := GD_framenum(d.df, "TIME", float64(query.TimeRange.To.Unix()))
+
+	//shoudl figure out the other stuff here like how to compute the number of frames and samples
+	backend.Logger.Info(fmt.Sprintf("frames from", int(startFrame), int(endFrame-startFrame)))
+
 	// create data frame response.
 	// For an overview on data frames and how grafana handles them:
 	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
 	frame := data.NewFrame("response")
 
+	//grab the data
+	dataSlice := GD_getdata(qm.FieldName, d.df, int(startFrame), 0, int(endFrame-startFrame), 0)
+	unixTimeSlice := GD_getdata("TIME", d.df, int(startFrame), 0, int(endFrame-startFrame), 0)
+
+	//create the time slice which will hold proper time objects
+	timeSlice := make([]time.Time, len(unixTimeSlice))
+
+	//loop through the ctimes and turn them into time objects
+	for i, c_time := range unixTimeSlice {
+		timeSlice[i] = time.Unix(int64(c_time), int64(math.Mod(c_time, 1)/1e9))
+	}
+
 	// add fields.
 	frame.Fields = append(frame.Fields,
-		data.NewField("time", nil, []time.Time{query.TimeRange.From, query.TimeRange.To}),
-		data.NewField("values", nil, []int64{10, 20}),
+		data.NewField("time", nil, timeSlice),
+		data.NewField("values", nil, dataSlice),
 	)
 
 	// add the frames to the response.
