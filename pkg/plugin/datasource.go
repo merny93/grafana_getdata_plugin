@@ -21,10 +21,11 @@ var (
 	_ backend.QueryDataHandler      = (*Datasource)(nil)
 	_ backend.CheckHealthHandler    = (*Datasource)(nil)
 	_ instancemgmt.InstanceDisposer = (*Datasource)(nil)
+	// _ backend.StreamHandler         = (*Datasource)(nil) //streaming implementation
 )
 
-type InitSettings struct {
-	DatabaseLocation string `json:"path"` //this specifies how to unmarshal
+type Datasource struct {
+	df GD_dirfile //this is a pointer to a dirfile
 }
 
 // NewDatasource creates a new datasource instance.
@@ -45,9 +46,6 @@ func NewDatasource(settings backend.DataSourceInstanceSettings) (instancemgmt.In
 
 // Datasource is an example datasource which can respond to data queries, reports
 // its health and has streaming skills.
-type Datasource struct {
-	df GD_dirfile //this is a pointer to a dirfile
-}
 
 // Dispose here tells plugin SDK that plugin wants to clean up resources when a new instance
 // created. As soon as datasource settings change detected by SDK old datasource instance will
@@ -79,17 +77,7 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-type QueryModel struct {
-	FieldName   string `json:"fieldName"`
-	StartIndex  int    `json:"startIndex"`
-	FrameNumber int    `json:"frameNumber"`
-}
-
 func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
-
-	//time lives in
-	//query
-	// query.TimeRange.From, query.TimeRange.To
 
 	var response backend.DataResponse
 
@@ -101,22 +89,58 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
+	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s", qm.TimeName, qm.FieldName))
+
 	//grab the starting time and the end time
 	//using the default TIME field here... might be wrong
-	startFrame := GD_framenum(d.df, "TIME", float64(query.TimeRange.From.Unix()))
-	endFrame := GD_framenum(d.df, "TIME", float64(query.TimeRange.To.Unix()))
+	firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.From.Unix()))
+	if firstFrame_float < 0 {
+		//if the start frame is negative, set it to 0
+		firstFrame_float = 0
+	}
+	endFrame := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.To.Unix()))
+	if endFrame < 0 {
+		//if last requested data is also in the past nothing to do just return the empty response
+		return response
+	}
+
+	//this is what will be passed to getdata
+	numFrames := int(endFrame - firstFrame_float)
+	firstFrame := int(firstFrame_float)
+
+	//figure out decimation
 
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
-	backend.Logger.Info(fmt.Sprintf("frames from", int(startFrame), int(endFrame-startFrame)))
-
-	// create data frame response.
-	// For an overview on data frames and how grafana handles them:
-	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
-	frame := data.NewFrame("response")
+	backend.Logger.Info(fmt.Sprintf("frames from: %v, %v", firstFrame, numFrames))
 
 	//grab the data
-	dataSlice := GD_getdata(qm.FieldName, d.df, int(startFrame), 0, int(endFrame-startFrame), 0)
-	unixTimeSlice := GD_getdata("TIME", d.df, int(startFrame), 0, int(endFrame-startFrame), 0)
+	dataSlice := GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
+	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
+
+	//decimate the data
+	if query.MaxDataPoints < int64(len(dataSlice)) {
+		decimationFactor := int64(math.Ceil(float64(int64(len(dataSlice)) / query.MaxDataPoints)))
+		resultSize := int64(len(dataSlice) / int(decimationFactor))
+		dataSlice_tmp := make([]float64, resultSize)
+
+		for i := 0; i < len(dataSlice); i++ {
+			if i%int(decimationFactor) == 0 {
+				dataSlice_tmp[int(i/int(decimationFactor))] = dataSlice[i]
+			}
+		}
+		dataSlice = dataSlice_tmp
+	}
+	if len(dataSlice) < len(unixTimeSlice) {
+		decimationFactor := int(len(unixTimeSlice) / len(dataSlice))
+		resutSize := len(dataSlice)
+		unixTimeSlice_tmp := make([]float64, resutSize)
+		for i := 0; i < len(unixTimeSlice); i++ {
+			if i%int(decimationFactor) == 0 {
+				unixTimeSlice_tmp[int(i/int(decimationFactor))] = unixTimeSlice[i]
+			}
+		}
+		unixTimeSlice = unixTimeSlice_tmp
+	}
 
 	//create the time slice which will hold proper time objects
 	timeSlice := make([]time.Time, len(unixTimeSlice))
@@ -125,6 +149,11 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	for i, c_time := range unixTimeSlice {
 		timeSlice[i] = time.Unix(int64(c_time), int64(math.Mod(c_time, 1)/1e9))
 	}
+
+	// create data frame response.
+	// For an overview on data frames and how grafana handles them:
+	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
+	frame := data.NewFrame("response")
 
 	// add fields.
 	frame.Fields = append(frame.Fields,
@@ -137,6 +166,26 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 
 	return response
 }
+
+/// stubs for streaming implementation *****************************************
+
+// func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
+// 	// Implement subscription logic here
+// 	return nil, nil
+// }
+
+// func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRequest, sender *backend.StreamSender) error {
+// 	// Implement data retrieval and streaming logic here
+// 	return nil
+
+// }
+
+// func (d *Datasource) PublishStream(ctx context.Context, request *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
+// 	// Implement data publishing logic here
+// 	return nil, nil
+// }
+
+/// ***************************************************************************
 
 // CheckHealth handles health checks sent from Grafana to the plugin.
 // The main use case for these health checks is the test button on the
