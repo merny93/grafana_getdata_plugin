@@ -117,6 +117,13 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	dataSlice := GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
 	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
 
+	if dataSlice == nil || unixTimeSlice == nil {
+		backend.Logger.Info("getdata querry was unsuccessful")
+		return response
+	}
+
+	backend.Logger.Info("getdata querry was successful")
+
 	//the excess sampleRate is just the ratio of extra time stamps
 	sampleRate := int(len(unixTimeSlice) / len(dataSlice))
 
@@ -124,6 +131,7 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	var resultSize int = len(dataSlice)
 	//decimate the data
 	if query.MaxDataPoints < int64(len(dataSlice)) {
+		backend.Logger.Info("decimating data")
 		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(query.MaxDataPoints)))
 		resultSize = int(len(dataSlice) / int(decimationFactor))
 		dataSlice_tmp := make([]float64, resultSize)
@@ -136,6 +144,7 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 		dataSlice = dataSlice_tmp
 	}
 	if len(dataSlice) < len(unixTimeSlice) {
+		backend.Logger.Info("decimating time")
 		decimationFactor = decimationFactor * sampleRate
 		unixTimeSlice_tmp := make([]float64, resultSize)
 
@@ -163,7 +172,7 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 	// add fields.
 	frame.Fields = append(frame.Fields,
 		data.NewField("time", nil, timeSlice),
-		data.NewField("values", nil, dataSlice),
+		data.NewField(qm.FieldName, nil, dataSlice),
 	)
 
 	// add the frames to the response.
