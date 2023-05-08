@@ -25,7 +25,7 @@ var (
 )
 
 type Datasource struct {
-	df GD_dirfile //this is a pointer to a dirfile
+	df Dirfile
 }
 
 // NewDatasource creates a new datasource instance.
