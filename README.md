@@ -1,4 +1,19 @@
-# Grafana data source plugin template
+# Grafana GetData backend datasource plugin #
+
+This is an attempt to connect the GetData project to Grafana via a backend datasource plugin.
+
+This pluggin is unsigned so this means that you will have to change the grafana config to development mode.
+By default this file is `/etc/grafana/grafana.ini`
+
+The `install.sh` script will clean the `dist/` folder and then build the front end using `yarn` and the backend (exclusivly for ubuntu_amd64) using `go build` into it, finally it will copy the contents into `/var/lib/grafana/plugins/simon-myplugin-datasource/` which should be in the path that grafan loads pluggins from. If you are not on ubuntu (goodluck) or you are not using an amd 64bit machine you need to update the `-o` flag in the `install.sh` script accordingly (just try and grafana will spit out a helpful error message)
+
+Of course GetData needs to be installed on your machine in the usual place, the build directives for `cgo` use the following ldflags: `-L/usr/local/lib -lgetdata`, update them in `pkg/plugin/getdata.go` accordingly.
+
+As mentioned above, I am not using `mage` as it does not want to work with `cgo` which just means that the build is not cross-platform (no big deal, this is development).
+
+The tasks in `TODO.md` are my best guess on what needs to get done to replace kst. Once that is done we can go through the effort of signing the plugin and calling it version 1.0
+
+# Default "Grafana data source plugin template" README
 
 This template is a starting point for building a Data Source Plugin for Grafana.
 
