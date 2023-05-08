@@ -1,6 +1,14 @@
-
- ~ - implement a `maxvals` so that it gives u a resonable amount of data if you ask for too much~
- - add streaming capabilities, will have to tie it to a fake python generator: HARD
- ~ - figure out the difference between frame and sample lol ~
- ~ - add option for X axis, defaults to TIME, idk why one would not want time but whatever... ~
- - add real error handling using gd_error(*DIRFILE):next todo
+- add streaming capabilities:
+    - figure out how a backend plugin sends a stream (send Channel field or smthing)
+    - extend the datasource object
+    - figure out how the backend knows when to push new data. Should it be tied to one of the news servers?
+    - ~~ will have to tie it to a fake python generator ~~
+- Options to do time lookup by index:
+    - checkox to switch to index
+    - set datarate
+    - set end condition (now minus time or something, still want to use grafana default time options)
+- add real error handling using gd_error(*DIRFILE)
+- improve thread-lock. Unclear what will happen when it is running as an actual server...
+- ~~ implement a `maxvals` so that it gives u a resonable amount of data if you ask for too much ~~\
+- ~~ add option for X axis, defaults to TIME, idk why one would not want time but whatever... ~~
+- ~~ figure out the difference between frame and sample lol ~~
