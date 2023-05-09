@@ -100,3 +100,22 @@ func GD_match_entries(df Dirfile, regexString string) []string {
 	return result_go
 
 }
+
+func GD_error(df Dirfile) string {
+
+	defer (df.mutex).Unlock()
+	(df.mutex).Lock()
+
+	if C.gd_error(df.df) == 0 {
+		return ""
+	}
+
+	errorSringPointer := C.gd_error_string(df.df, nil, 0)
+
+	errorStringGo := C.GoString(errorSringPointer)
+
+	C.free(unsafe.Pointer(errorSringPointer))
+
+	fmt.Println("Error code: ", errorStringGo)
+	return errorStringGo
+}

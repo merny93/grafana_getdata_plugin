@@ -116,14 +116,24 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 
 	//grab the data
 	dataSlice := GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
+	//error check
+	errStr := GD_error(d.df)
+	if errStr != "" {
+		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("getdata error: %s", errStr))
+	}
 	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
-
-	if dataSlice == nil || unixTimeSlice == nil {
-		backend.Logger.Info("getdata querry was unsuccessful")
-		return response
+	//error check
+	errStr = GD_error(d.df)
+	if errStr != "" {
+		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("getdata error: %s", errStr))
 	}
 
-	backend.Logger.Info("getdata querry was successful")
+	if dataSlice == nil || unixTimeSlice == nil {
+		backend.Logger.Info("No data in selected time range")
+		return response
+	}
 
 	//the excess sampleRate is just the ratio of extra time stamps
 	sampleRate := int(len(unixTimeSlice) / len(dataSlice))
@@ -231,13 +241,14 @@ func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResource
 func (d *Datasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	//lets try reading the time field as it should always be there
 
-	res := GD_getdata("INDEX", d.df, 0, 0, 0, 1)
-
 	var status = backend.HealthStatusOk
 	var message = "Data source is working"
-	if res == nil {
+
+	res := GD_getdata("INDEX", d.df, 0, 0, 0, 1)
+	errStr := GD_error(d.df)
+	if errStr != "" || res == nil {
 		status = backend.HealthStatusError
-		message = "Was not able to find the TIME field in specified dirfile location"
+		message = fmt.Sprintf("getdata error: %s", errStr)
 	}
 
 	return &backend.CheckHealthResult{

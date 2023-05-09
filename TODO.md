@@ -8,9 +8,9 @@
     - set datarate
     - set end condition (now minus time or something, still want to use grafana default time options)
 - Smarter memory allocation for gd_getdata. Currently making a dummy call with `restype = void` to figure out how much data to allocate before actually calling the function 
-- add real error handling using gd_error(*DIRFILE)
 - improve thread-lock. Unclear what will happen when it is running as an actual server...
 - Build tools: Get it to work with mage (or write a sciprt that generates all the needed binaries to call it a actual plugin)
+- ~~add real error handling using gd_error(*DIRFILE)~~
 - ~~Helpful field lookup~~
     - ~~Drop down with suggestions on field when looking up a field~~
     - ~~Support regex as kst does~~
