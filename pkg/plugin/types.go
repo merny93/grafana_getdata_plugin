@@ -5,8 +5,9 @@ type InitSettings struct {
 }
 
 type QueryModel struct {
-	FieldName string `json:"fieldName"`
-	TimeName  string `json:"timeName"`
+	FieldName     string `json:"fieldName"`
+	TimeName      string `json:"timeName"`
+	StreamingBool bool   `json:"streamingBool"`
 }
 
 type AutocompleteRequest struct {

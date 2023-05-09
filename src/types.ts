@@ -3,11 +3,12 @@ import { DataQuery, DataSourceJsonData } from '@grafana/data';
 export interface MyQuery extends DataQuery {
   fieldName: string;
   timeName: string;
-
+  streamingBool: boolean;
 }
 
 export const DEFAULT_QUERY: Partial<MyQuery> = {
   timeName: "TIME",
+  streamingBool: false
 };
 
 /**

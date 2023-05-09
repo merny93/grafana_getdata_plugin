@@ -22,7 +22,7 @@ var (
 	_ backend.QueryDataHandler      = (*Datasource)(nil)
 	_ backend.CheckHealthHandler    = (*Datasource)(nil)
 	_ instancemgmt.InstanceDisposer = (*Datasource)(nil)
-	// _ backend.StreamHandler         = (*Datasource)(nil) //streaming implementation
+	_ backend.StreamHandler         = (*Datasource)(nil) //streaming implementation
 )
 
 type Datasource struct {
@@ -78,7 +78,7 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
+func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 
 	var response backend.DataResponse
 
@@ -186,6 +186,17 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 		data.NewField(qm.FieldName, nil, dataSlice),
 	)
 
+	// Add the "Channel" field to the frame metadata
+	// this should convince grafana to stream
+	// pCtx.DataSourceInstanceSettings.UID
+	if qm.StreamingBool {
+		frame.Meta = &data.FrameMeta{
+			// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
+			// Channel: "ds/simon-myplugin-datasource/stream",
+			Channel: "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName,
+		}
+	}
+
 	// add the frames to the response.
 	response.Frames = append(response.Frames, frame)
 
@@ -194,25 +205,35 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 
 /// stubs for streaming implementation *****************************************
 
-// func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
-// 	// Implement subscription logic here
-// 	return nil, nil
-// }
+func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.SubscribeStreamRequest) (*backend.SubscribeStreamResponse, error) {
+	// Implement subscription logic here
+	backend.Logger.Info("SubscribeStream called")
+	status := backend.SubscribeStreamStatusOK
+	return &backend.SubscribeStreamResponse{Status: status}, nil
+}
 
-// func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRequest, sender *backend.StreamSender) error {
-// 	// Implement data retrieval and streaming logic here
-// 	return nil
+func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRequest, sender *backend.StreamSender) error {
+	// request.Data
+	// Implement data retrieval and streaming logic here
+	backend.Logger.Info("RunStream called")
+	// sender.SendFrame(&backend.StreamPacket{
+	// 	// Frame: frame,
+	// })
 
-// }
+	return nil
 
-// func (d *Datasource) PublishStream(ctx context.Context, request *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
-// 	// Implement data publishing logic here
-// 	return nil, nil
-// }
+}
+
+func (d *Datasource) PublishStream(ctx context.Context, request *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {
+	// Implement data publishing logic here
+	backend.Logger.Info("PublishStream called")
+	status := backend.PublishStreamStatusPermissionDenied
+	return &backend.PublishStreamResponse{Status: status}, nil
+}
 
 /// ***************************************************************************
 
-/// stubs for resource handler, will autocomplete queries ************************
+/// Resrouce handler which serves the autocomplete endpoint. will autocomplete queries ************************
 
 func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
 	var reqGo AutocompleteRequest

@@ -1,5 +1,5 @@
 import React, {useState } from 'react';
-import {InlineFormLabel, AsyncSelect, LoadOptionsCallback} from '@grafana/ui';
+import {InlineFormLabel, AsyncSelect, LoadOptionsCallback, Checkbox} from '@grafana/ui';
 import { QueryEditorProps, SelectableValue } from '@grafana/data';
 import { DataSource } from '../datasource';
 import { MyDataSourceOptions, MyQuery } from '../types';
@@ -38,6 +38,7 @@ export function QueryEditor(props: Props) {
 
   const [timeName, setTimeName] = useState<SelectableValue<string>>({label: props.query.timeName, value: props.query.timeName});
   const [fieldName, setFieldName] = useState<SelectableValue<string>>({label: props.query.fieldName, value: props.query.fieldName});
+  const [streamingBool, setStreamingBool] = useState<boolean>(props.query.streamingBool);
 
   return (
     <div className="gf-form">
@@ -63,6 +64,11 @@ export function QueryEditor(props: Props) {
           allowCreateWhileLoading
           openMenuOnFocus
         />
+        <Checkbox value={streamingBool} onChange={(e) => 
+          {e.currentTarget.checked ? setStreamingBool(true) : setStreamingBool(false); 
+          props.onChange({ ...props.query, streamingBool: e.currentTarget.checked });
+          }} 
+          label="Streaming" description="Enable streaming mode"/>
     </div>
   );
 }
