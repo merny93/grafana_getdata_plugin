@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -201,6 +202,28 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 
 /// ***************************************************************************
 
+/// stubs for resource handler, will autocomplete queries ************************
+
+func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
+	var reqGo AutocompleteRequest
+
+	json.Unmarshal(req.Body, &reqGo)
+
+	backend.Logger.Info(fmt.Sprintf("interpreted %s", reqGo.RegexString))
+
+	matchList := GD_match_entries(d.df, reqGo.RegexString)
+
+	response := AutocompleteResponse{MatchList: matchList}
+	responseBytes, _ := json.Marshal(response)
+
+	return sender.Send(&backend.CallResourceResponse{
+		Status: http.StatusOK,
+		Body:   responseBytes,
+	})
+}
+
+/// ***************************************************************************
+
 // CheckHealth handles health checks sent from Grafana to the plugin.
 // The main use case for these health checks is the test button on the
 // datasource configuration page which allows users to verify that
@@ -208,7 +231,7 @@ func (d *Datasource) query(_ context.Context, pCtx backend.PluginContext, query 
 func (d *Datasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	//lets try reading the time field as it should always be there
 
-	res := GD_getdata("TIME", d.df, 0, 0, 0, 1)
+	res := GD_getdata("INDEX", d.df, 0, 0, 0, 1)
 
 	var status = backend.HealthStatusOk
 	var message = "Data source is working"

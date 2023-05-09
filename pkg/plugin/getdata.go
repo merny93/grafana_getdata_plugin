@@ -71,3 +71,32 @@ func GD_framenum(df Dirfile, field_name string, value float64) float64 {
 	C.free(unsafe.Pointer(field_name_c))
 	return index
 }
+
+func GD_match_entries(df Dirfile, regexString string) []string {
+	//returns a list of all entries in the dirfile
+	//that match the regex string
+
+	defer (df.mutex).Unlock()
+	(df.mutex).Lock()
+
+	regexString_c := C.CString(regexString)
+	var result **C.char
+	numMatches := C.gd_match_entries(df.df, regexString_c, 0, 0, C.GD_REGEX_CASELESS, &result)
+
+	//free the regex string
+	C.free(unsafe.Pointer(regexString_c))
+
+	//loop through the result and convert to go string
+	result_go := make([]string, numMatches)
+	for i := 0; i < int(numMatches); i++ {
+		//chatgpt said this was gonna work and it was right, shocking
+		// this is doing pointer arithmetic to get the ith element of the result array, here Sizeof(result) should just be a pointer size
+		// then we dereference that pointer to get the string
+		result_go[i] = C.GoString(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(result)) + uintptr(i)*unsafe.Sizeof(result))))
+	}
+
+	//do not free the result as it is managed by the getdata library and will be freeed when the dirfile is closed
+
+	return result_go
+
+}

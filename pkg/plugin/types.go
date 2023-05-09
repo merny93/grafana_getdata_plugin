@@ -8,3 +8,11 @@ type QueryModel struct {
 	FieldName string `json:"fieldName"`
 	TimeName  string `json:"timeName"`
 }
+
+type AutocompleteRequest struct {
+	RegexString string `json:"regexString"`
+}
+
+type AutocompleteResponse struct {
+	MatchList []string
+}
