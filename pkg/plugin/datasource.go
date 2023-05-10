@@ -202,10 +202,10 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	// Implement data retrieval and streaming logic here
 	backend.Logger.Info("RunStream called")
 
-	// get the name of the name of the field, held in path as strea/NameOfField
+	// get the name of the name of the field, held in path as stream/NameOfField
 	fieldName := strings.Split(request.Path, "/")[1]
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
-	defer backend.Logger.Info("THE RUNSTREAM IS TERMINATED")
+	defer backend.Logger.Info(fmt.Sprintf("THE RUNSTREAM IS TERMINATED for endpoint: %s", request.Path))
 	var newFrame int
 	for {
 		newFrame = GD_nframes(d.df)
@@ -244,11 +244,9 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				data.NewField(fieldName, nil, dataSlice),
 			)
 
-			backend.Logger.Info("Created frame")
-
 			sender.SendFrame(frame, data.IncludeAll)
 
-			backend.Logger.Info("Sent frame")
+			backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
 			//sleep a bit
 			time.Sleep(1 * time.Second)
 		}

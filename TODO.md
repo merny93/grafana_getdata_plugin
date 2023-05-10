@@ -1,4 +1,7 @@
 - add streaming capabilities:
+    - Some weirdness with streaming multiple endpoints at the same time, somehow I managed to instantiate two identical endpoints
+    - Calls to RunStream do not seem to ever terminate even when the subscribers disconnect
+    - Make the time field variable, currently hardcoded x axis field as TIME, either pass it along from the request or encode in the endpoint
     - ~~figure out how a backend plugin sends a stream (send Channel field or smthing)~~
     - ~~extend the datasource object~~
     - ~~figure out how the backend knows when to push new data. Should it be tied to one of the news servers?~~ Checking nframes and sending when it increases
