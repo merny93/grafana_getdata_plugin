@@ -88,8 +88,38 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 
 	err := json.Unmarshal(query.JSON, &qm)
 	if err != nil {
+		//if it fails we really cant do much
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
+
+	// create data frame response.
+	// For an overview on data frames and how grafana handles them:
+	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
+	frame := data.NewFrame("response")
+	response.Frames = append(response.Frames, frame)
+
+	//create the arrays which we will return eventually
+	var timeSlice []time.Time
+	var dataSlice []float64
+
+	// add fields and frame to the response. Do this now so the response gets sent back correctly always
+	defer func() {
+		frame.Fields = append(frame.Fields,
+			data.NewField("time", nil, timeSlice),
+			data.NewField(qm.FieldName, nil, dataSlice),
+		)
+		// Add the "Channel" field to the frame metadata
+		// this should convince grafana to stream
+		// pCtx.DataSourceInstanceSettings.UID
+		if qm.StreamingBool {
+			backend.Logger.Info(fmt.Sprintf("Creating a steram on %s", "ds/"+pCtx.DataSourceInstanceSettings.UID+"/stream/"+qm.FieldName))
+			frame.Meta = &data.FrameMeta{
+				// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
+				// Channel: "ds/simon-myplugin-datasource/stream",
+				Channel: "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName,
+			}
+		}
+	}()
 
 	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s. Will initiate streaming: %t", qm.TimeName, qm.FieldName, qm.StreamingBool))
 
@@ -113,91 +143,41 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
 	backend.Logger.Info(fmt.Sprintf("frames from: %v, %v", firstFrame, numFrames))
 
-	//grab the data
-	dataSlice := GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
-	//error check
+	//grab the data and error check
+	dataSlice = GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
 	errStr := GD_error(d.df)
 	if errStr != "" {
 		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("getdata error: %s", errStr))
 	}
 	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
-	//error check
 	errStr = GD_error(d.df)
 	if errStr != "" {
 		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("getdata error: %s", errStr))
 	}
-
+	//if there was no error but there was also no data
 	if dataSlice == nil || unixTimeSlice == nil {
 		backend.Logger.Info("No data in selected time range")
 		return response
 	}
 
+	//decimate the data
+	//first decimate the data and then decimate time to match, sometimes time is sampled at higher freqeuncy so use sample rate
+	var decimationFactor int = 1
 	//the excess sampleRate is just the ratio of extra time stamps
 	sampleRate := int(len(unixTimeSlice) / len(dataSlice))
-
-	var decimationFactor int = 1
-	var resultSize int = len(dataSlice)
-	//decimate the data
 	if query.MaxDataPoints < int64(len(dataSlice)) {
-		backend.Logger.Info("decimating data")
 		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(query.MaxDataPoints)))
-		resultSize = int(len(dataSlice) / int(decimationFactor))
-		dataSlice_tmp := make([]float64, resultSize)
-
-		for i := 0; i < resultSize*decimationFactor; i++ {
-			if i%int(decimationFactor) == 0 {
-				dataSlice_tmp[int(i/int(decimationFactor))] = dataSlice[i]
-			}
-		}
-		dataSlice = dataSlice_tmp
+		dataSlice = decimate(dataSlice, decimationFactor)
 	}
 	if len(dataSlice) < len(unixTimeSlice) {
-		backend.Logger.Info("decimating time")
-		decimationFactor = decimationFactor * sampleRate
-		unixTimeSlice_tmp := make([]float64, resultSize)
-
-		for i := 0; i < resultSize*decimationFactor; i++ {
-			if i%int(decimationFactor) == 0 {
-				unixTimeSlice_tmp[int(i/int(decimationFactor))] = unixTimeSlice[i]
-			}
-		}
-		unixTimeSlice = unixTimeSlice_tmp
+		unixTimeSlice = decimate(unixTimeSlice, decimationFactor*sampleRate)
 	}
 
-	//create the time slice which will hold proper time objects
-	timeSlice := make([]time.Time, len(unixTimeSlice))
+	timeSlice = unixSlice2TimeSlice(unixTimeSlice)
 
-	//loop through the ctimes and turn them into time objects
-	for i, c_time := range unixTimeSlice {
-		timeSlice[i] = time.Unix(int64(c_time), int64(math.Mod(c_time, 1)/1e9))
-	}
-
-	// create data frame response.
-	// For an overview on data frames and how grafana handles them:
-	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
-	frame := data.NewFrame("response")
-
-	// add fields.
-	frame.Fields = append(frame.Fields,
-		data.NewField("time", nil, timeSlice),
-		data.NewField(qm.FieldName, nil, dataSlice),
-	)
-
-	// Add the "Channel" field to the frame metadata
-	// this should convince grafana to stream
-	// pCtx.DataSourceInstanceSettings.UID
-	if qm.StreamingBool {
-		frame.Meta = &data.FrameMeta{
-			// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
-			// Channel: "ds/simon-myplugin-datasource/stream",
-			Channel: "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName,
-		}
-	}
-
-	// add the frames to the response.
-	response.Frames = append(response.Frames, frame)
+	//dataSlice and timeSlice are added to the response by the defer call. This means that
 
 	return response
 }
