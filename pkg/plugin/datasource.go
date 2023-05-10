@@ -27,7 +27,8 @@ var (
 )
 
 type Datasource struct {
-	df Dirfile
+	df        Dirfile
+	lastFrame map[string]int
 }
 
 // NewDatasource creates a new datasource instance.
@@ -43,7 +44,7 @@ func NewDatasource(settings backend.DataSourceInstanceSettings) (instancemgmt.In
 	}
 	backend.Logger.Info("Attempting to open database located at: " + fmt.Sprint(params.DatabaseLocation))
 	df := GD_open(params.DatabaseLocation)
-	return &Datasource{df: df}, nil
+	return &Datasource{df: df, lastFrame: make(map[string]int)}, nil
 }
 
 // Datasource is an example datasource which can respond to data queries, reports
@@ -188,6 +189,11 @@ func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.Subsc
 	// Implement subscription logic here
 	backend.Logger.Info("SubscribeStream called")
 	status := backend.SubscribeStreamStatusOK
+
+	//write down the last frame
+	fieldName := strings.Split(request.Path, "/")[1]
+	d.lastFrame[fieldName] = GD_nframes(d.df)
+
 	return &backend.SubscribeStreamResponse{Status: status}, nil
 }
 
@@ -200,30 +206,53 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	fieldName := strings.Split(request.Path, "/")[1]
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer backend.Logger.Info("THE RUNSTREAM IS TERMINATED")
-	timeSlice := make([]time.Time, 1)
-	dataSlice := make([]float64, 1)
+	var newFrame int
 	for {
+		newFrame = GD_nframes(d.df)
+		if newFrame > d.lastFrame[fieldName] {
+			//new data
+			//grab the data and error check
+			dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0)
+			errStr := GD_error(d.df)
+			if errStr != "" {
+				backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+				continue
+			}
+			unixTimeSlice := GD_getdata("TIME", d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0) //todo make time name a variable
+			errStr = GD_error(d.df)
+			if errStr != "" {
+				backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+				continue
+			}
+			//if there was no error but there was also no data
+			if dataSlice == nil || unixTimeSlice == nil {
+				backend.Logger.Info("No data in selected time range")
+				continue
+			}
 
-		dataSlice[0] = 69.420
-		timeSlice[0] = time.Now()
+			//the excess sampleRate is just the ratio of extra time stamps
+			sampleRate := int(len(unixTimeSlice) / len(dataSlice))
+			if len(dataSlice) < len(unixTimeSlice) {
+				unixTimeSlice = decimate(unixTimeSlice, sampleRate)
+			}
 
-		backend.Logger.Info("generated fake data")
+			timeSlice := unixSlice2TimeSlice(unixTimeSlice)
 
-		frame := data.NewFrame("response")
-		frame.Fields = append(frame.Fields,
-			data.NewField("time", nil, timeSlice),
-			data.NewField(fieldName, nil, dataSlice),
-		)
+			frame := data.NewFrame("response")
+			frame.Fields = append(frame.Fields,
+				data.NewField("time", nil, timeSlice),
+				data.NewField(fieldName, nil, dataSlice),
+			)
 
-		backend.Logger.Info("Created frame")
+			backend.Logger.Info("Created frame")
 
-		sender.SendFrame(frame, data.IncludeAll)
+			sender.SendFrame(frame, data.IncludeAll)
 
-		backend.Logger.Info("Sent frame")
-		//sleep a bit
-		time.Sleep(1 * time.Second)
+			backend.Logger.Info("Sent frame")
+			//sleep a bit
+			time.Sleep(1 * time.Second)
+		}
 	}
-
 }
 
 func (d *Datasource) PublishStream(ctx context.Context, request *backend.PublishStreamRequest) (*backend.PublishStreamResponse, error) {

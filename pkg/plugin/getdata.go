@@ -26,8 +26,8 @@ func GD_open(dir_file_name string) Dirfile {
 	//this is unsafe, does not check success
 	var df *C.DIRFILE
 	file_name_c := C.CString(dir_file_name)
+	defer C.free(unsafe.Pointer(file_name_c))
 	df = C.gd_open(file_name_c, C.GD_RDONLY)
-	C.free(unsafe.Pointer(file_name_c))
 	return Dirfile{df: df, mutex: &sync.Mutex{}}
 }
 
@@ -38,6 +38,7 @@ func GD_getdata(field_name string, df Dirfile, first_frame, first_sample, num_fr
 
 	// convert the field name to c string
 	field_name_c := C.CString(field_name)
+	defer C.free(unsafe.Pointer(field_name_c))
 
 	//make dummy result array pointer
 	var dummy_result *float64
@@ -52,7 +53,6 @@ func GD_getdata(field_name string, df Dirfile, first_frame, first_sample, num_fr
 	//pass the result array as a pointer using the first element of result assuming its contiguous
 	C.gd_getdata(df.df, field_name_c, C.long(first_frame), C.long(first_sample), C.ulong(num_frames), C.ulong(num_samples), C.GD_FLOAT64, unsafe.Pointer(&result[0]))
 
-	C.free(unsafe.Pointer(field_name_c))
 	return result
 }
 
@@ -66,9 +66,12 @@ func GD_framenum(df Dirfile, field_name string, value float64) float64 {
 	df.mutex.Lock()
 
 	field_name_c := C.CString(field_name)
+	defer C.free(unsafe.Pointer(field_name_c))
+
 	var index float64
+
 	index = float64(C.gd_framenum(df.df, field_name_c, C.double(value)))
-	C.free(unsafe.Pointer(field_name_c))
+
 	return index
 }
 
@@ -80,11 +83,11 @@ func GD_match_entries(df Dirfile, regexString string) []string {
 	(df.mutex).Lock()
 
 	regexString_c := C.CString(regexString)
-	var result **C.char
-	numMatches := C.gd_match_entries(df.df, regexString_c, 0, 0, C.GD_REGEX_CASELESS, &result)
+	defer C.free(unsafe.Pointer(regexString_c))
 
-	//free the regex string
-	C.free(unsafe.Pointer(regexString_c))
+	var result **C.char
+
+	numMatches := C.gd_match_entries(df.df, regexString_c, 0, 0, C.GD_REGEX_CASELESS, &result)
 
 	//loop through the result and convert to go string
 	result_go := make([]string, numMatches)
@@ -114,8 +117,18 @@ func GD_error(df Dirfile) string {
 
 	errorStringGo := C.GoString(errorSringPointer)
 
+	//from the GetData docs for gd_error_string:
+	// If buffer is NULL, a pointer to a newly-allocated buffer containing the entire error string is returned.
+	// In this case, buflen is ignored. This string will be allocated on the caller's heap and should be deallocated by the caller when no longer needed.
 	C.free(unsafe.Pointer(errorSringPointer))
 
 	fmt.Println("Error code: ", errorStringGo)
 	return errorStringGo
+}
+
+func GD_nframes(df Dirfile) int {
+	defer (df.mutex).Unlock()
+	(df.mutex).Lock()
+
+	return int(C.gd_nframes(df.df))
 }
