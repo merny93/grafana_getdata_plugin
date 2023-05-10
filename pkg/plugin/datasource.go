@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -90,7 +91,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
-	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s", qm.TimeName, qm.FieldName))
+	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s. Will initiate streaming: %t", qm.TimeName, qm.FieldName, qm.StreamingBool))
 
 	//grab the starting time and the end time
 	//using the default TIME field here... might be wrong
@@ -108,8 +109,6 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	//this is what will be passed to getdata
 	numFrames := int(endFrame - firstFrame_float)
 	firstFrame := int(firstFrame_float)
-
-	//figure out decimation
 
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
 	backend.Logger.Info(fmt.Sprintf("frames from: %v, %v", firstFrame, numFrames))
@@ -216,11 +215,34 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	// request.Data
 	// Implement data retrieval and streaming logic here
 	backend.Logger.Info("RunStream called")
-	// sender.SendFrame(&backend.StreamPacket{
-	// 	// Frame: frame,
-	// })
 
-	return nil
+	// get the name of the name of the field, held in path as strea/NameOfField
+	fieldName := strings.Split(request.Path, "/")[1]
+	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
+	defer backend.Logger.Info("THE RUNSTREAM IS TERMINATED")
+	timeSlice := make([]time.Time, 1)
+	dataSlice := make([]float64, 1)
+	for {
+
+		dataSlice[0] = 69.420
+		timeSlice[0] = time.Now()
+
+		backend.Logger.Info("generated fake data")
+
+		frame := data.NewFrame("response")
+		frame.Fields = append(frame.Fields,
+			data.NewField("time", nil, timeSlice),
+			data.NewField(fieldName, nil, dataSlice),
+		)
+
+		backend.Logger.Info("Created frame")
+
+		sender.SendFrame(frame, data.IncludeAll)
+
+		backend.Logger.Info("Sent frame")
+		//sleep a bit
+		time.Sleep(1 * time.Second)
+	}
 
 }
 

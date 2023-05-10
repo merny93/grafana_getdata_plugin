@@ -2,7 +2,7 @@
     - ~~figure out how a backend plugin sends a stream (send Channel field or smthing)~~
     - ~~extend the datasource object~~
     - figure out how the backend knows when to push new data. Should it be tied to one of the news servers?
-    - figureout the runstream method
+    - ~~figureout the runstream method~~
     - ~~will have to tie it to a fake python generator~~
 - Options to do time lookup by index:
     - checkox to switch to index
