@@ -1,8 +1,8 @@
 - add streaming capabilities:
-    - Some weirdness with streaming multiple endpoints at the same time, somehow I managed to instantiate two identical endpoints... might have fixed
-    - Calls to RunStream do not seem to ever terminate even when the subscribers disconnect
+    - ~~Some weirdness with streaming multiple endpoints at the same time, somehow I managed to instantiate two identical endpoints... might have fixed~~ I think I fixed it
+    - ~~Calls to RunStream do not seem to ever terminate even when the subscribers disconnect~~ It was resource dependant, when push comes to shove it happens
     - Make the time field variable, currently hardcoded x axis field as TIME, either pass it along from the request or encode in the endpoint
-    - bug: the max points is used as a buffer and streaming at full resolution easily overfills it deleting old data points. In addition the data is cached which means that a soft refresh does not solve the problem. Desired behavior is to first fetch historical data and then fill with streamed data. If overfilled decimate instead of deleting old data: [maybe relevant github issue](https://github.com/grafana/grafana/issues/43286)
+    - ~~bug: the max points is used as a buffer and streaming at full resolution easily overfills it deleting old data points. In addition the data is cached which means that a soft refresh does not solve the problem. Desired behavior is to first fetch historical data and then fill with streamed data. If overfilled decimate instead of deleting old data: [maybe relevant github issue](https://github.com/grafana/grafana/issues/43286)~~ fixed by following the example from [mqtt-datasource-plugin](https://github.com/grafana/mqtt-datasource/blob/main/pkg/plugin/stream.go)
     - ~~figure out how a backend plugin sends a stream (send Channel field or smthing)~~
     - ~~extend the datasource object~~
     - ~~figure out how the backend knows when to push new data. Should it be tied to one of the news servers?~~ Checking nframes and sending when it increases

@@ -113,11 +113,12 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		// this should convince grafana to stream
 		// pCtx.DataSourceInstanceSettings.UID
 		if qm.StreamingBool {
-			backend.Logger.Info(fmt.Sprintf("Creating a steram on %s", "ds/"+pCtx.DataSourceInstanceSettings.UID+"/stream/"+qm.FieldName))
+			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String()
+			backend.Logger.Info(fmt.Sprintf("Creating a steram on %s", channalName))
 			frame.Meta = &data.FrameMeta{
 				// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
 				// Channel: "ds/simon-myplugin-datasource/stream",
-				Channel: "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName,
+				Channel: channalName,
 			}
 		}
 	}()
@@ -205,29 +206,36 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	backend.Logger.Info("RunStream called")
 
 	// get the name of the name of the field, held in path as stream/NameOfField
-	fieldName := strings.Split(request.Path, "/")[1]
+	chunks := strings.Split(request.Path, "/")
+	fieldName := chunks[1]
+	interval, err := time.ParseDuration(chunks[2])
+	if err != nil {
+		return err
+	}
+
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer backend.Logger.Info(fmt.Sprintf("THE RUNSTREAM IS TERMINATED for endpoint: %s", request.Path))
 
-	ticker := time.NewTicker(time.Second * 2)
+	ticker := time.NewTicker(interval)
 	var newFrame int
 	for {
 		select {
 		case <-ctx.Done():
 			backend.Logger.Info("Context done")
+			ticker.Stop()
 			return nil
 		case <-ticker.C:
 			newFrame = GD_nframes(d.df)
 			if newFrame > d.lastFrame[fieldName] {
 				//new data
 				//grab the data and error check
-				dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0)
+				dataSlice := GD_getdata(fieldName, d.df, newFrame-1, 0, 0, 1)
 				errStr := GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 					continue
 				}
-				unixTimeSlice := GD_getdata("TIME", d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0) //todo make time name a variable
+				unixTimeSlice := GD_getdata("TIME", d.df, newFrame-1, 0, 0, 1) //todo make time name a variable
 				errStr = GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
@@ -237,12 +245,6 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				if dataSlice == nil || unixTimeSlice == nil {
 					backend.Logger.Info("No data in selected time range")
 					continue
-				}
-
-				//the excess sampleRate is just the ratio of extra time stamps
-				sampleRate := int(len(unixTimeSlice) / len(dataSlice))
-				if len(dataSlice) < len(unixTimeSlice) {
-					unixTimeSlice = decimate(unixTimeSlice, sampleRate)
 				}
 
 				timeSlice := unixSlice2TimeSlice(unixTimeSlice)
@@ -255,7 +257,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 
 				sender.SendFrame(frame, data.IncludeAll)
 
-				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
+				// backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
 			}
 		}
 	}
