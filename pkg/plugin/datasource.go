@@ -194,8 +194,7 @@ func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.Subsc
 	status := backend.SubscribeStreamStatusOK
 
 	//write down the last frame
-	fieldName := strings.Split(request.Path, "/")[1]
-	d.lastFrame[fieldName] = GD_nframes(d.df)
+	d.lastFrame[request.Path] = GD_nframes(d.df) - 1
 
 	return &backend.SubscribeStreamResponse{Status: status}, nil
 }
@@ -226,7 +225,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 			return nil
 		case <-ticker.C:
 			newFrame = GD_nframes(d.df)
-			if newFrame > d.lastFrame[fieldName] {
+			if newFrame > d.lastFrame[request.Path] {
 				//new data
 				//grab the data and error check
 				dataSlice := GD_getdata(fieldName, d.df, newFrame-1, 0, 0, 1)
@@ -257,7 +256,11 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 
 				sender.SendFrame(frame, data.IncludeAll)
 
-				// backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
+				//update the last frame
+				d.lastFrame[request.Path] = newFrame
+
+				//debuggg
+				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
 			}
 		}
 	}
