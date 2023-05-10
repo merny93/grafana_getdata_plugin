@@ -122,7 +122,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		}
 	}()
 
-	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s. Will initiate streaming: %t", qm.TimeName, qm.FieldName, qm.StreamingBool))
+	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s. Will initiate streaming: %t\nGoing from: %s to: %s", qm.TimeName, qm.FieldName, qm.StreamingBool, query.TimeRange.From.Format(time.ANSIC), query.TimeRange.To.Format(time.ANSIC)))
 
 	//grab the starting time and the end time
 	//using the default TIME field here... might be wrong
@@ -178,6 +178,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 
 	timeSlice = unixSlice2TimeSlice(unixTimeSlice)
 
+	backend.Logger.Info(fmt.Sprintf("Sending: %v values", len(timeSlice)))
+
 	//dataSlice and timeSlice are added to the response by the defer call. This means that
 
 	return response
@@ -206,49 +208,55 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	fieldName := strings.Split(request.Path, "/")[1]
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer backend.Logger.Info(fmt.Sprintf("THE RUNSTREAM IS TERMINATED for endpoint: %s", request.Path))
+
+	ticker := time.NewTicker(time.Second * 2)
 	var newFrame int
 	for {
-		newFrame = GD_nframes(d.df)
-		if newFrame > d.lastFrame[fieldName] {
-			//new data
-			//grab the data and error check
-			dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0)
-			errStr := GD_error(d.df)
-			if errStr != "" {
-				backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
-				continue
+		select {
+		case <-ctx.Done():
+			backend.Logger.Info("Context done")
+			return nil
+		case <-ticker.C:
+			newFrame = GD_nframes(d.df)
+			if newFrame > d.lastFrame[fieldName] {
+				//new data
+				//grab the data and error check
+				dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0)
+				errStr := GD_error(d.df)
+				if errStr != "" {
+					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+					continue
+				}
+				unixTimeSlice := GD_getdata("TIME", d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0) //todo make time name a variable
+				errStr = GD_error(d.df)
+				if errStr != "" {
+					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+					continue
+				}
+				//if there was no error but there was also no data
+				if dataSlice == nil || unixTimeSlice == nil {
+					backend.Logger.Info("No data in selected time range")
+					continue
+				}
+
+				//the excess sampleRate is just the ratio of extra time stamps
+				sampleRate := int(len(unixTimeSlice) / len(dataSlice))
+				if len(dataSlice) < len(unixTimeSlice) {
+					unixTimeSlice = decimate(unixTimeSlice, sampleRate)
+				}
+
+				timeSlice := unixSlice2TimeSlice(unixTimeSlice)
+
+				frame := data.NewFrame("response")
+				frame.Fields = append(frame.Fields,
+					data.NewField("time", nil, timeSlice),
+					data.NewField(fieldName, nil, dataSlice),
+				)
+
+				sender.SendFrame(frame, data.IncludeAll)
+
+				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
 			}
-			unixTimeSlice := GD_getdata("TIME", d.df, d.lastFrame[fieldName], 0, newFrame-d.lastFrame[fieldName], 0) //todo make time name a variable
-			errStr = GD_error(d.df)
-			if errStr != "" {
-				backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
-				continue
-			}
-			//if there was no error but there was also no data
-			if dataSlice == nil || unixTimeSlice == nil {
-				backend.Logger.Info("No data in selected time range")
-				continue
-			}
-
-			//the excess sampleRate is just the ratio of extra time stamps
-			sampleRate := int(len(unixTimeSlice) / len(dataSlice))
-			if len(dataSlice) < len(unixTimeSlice) {
-				unixTimeSlice = decimate(unixTimeSlice, sampleRate)
-			}
-
-			timeSlice := unixSlice2TimeSlice(unixTimeSlice)
-
-			frame := data.NewFrame("response")
-			frame.Fields = append(frame.Fields,
-				data.NewField("time", nil, timeSlice),
-				data.NewField(fieldName, nil, dataSlice),
-			)
-
-			sender.SendFrame(frame, data.IncludeAll)
-
-			backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
-			//sleep a bit
-			time.Sleep(1 * time.Second)
 		}
 	}
 }
