@@ -1,4 +1,5 @@
-- add streaming capabilities:
+- ~~add streaming capabilities:~~
+    - ~~add ability to stream with arbitrary x axis~~
     - ~~Some weirdness with streaming multiple endpoints at the same time, somehow I managed to instantiate two identical endpoints... might have fixed~~ I think I fixed it
     - ~~Calls to RunStream do not seem to ever terminate even when the subscribers disconnect~~ It was resource dependant, when push comes to shove it happens
     - Make the time field variable, currently hardcoded x axis field as TIME, either pass it along from the request or encode in the endpoint
@@ -8,10 +9,10 @@
     - ~~figure out how the backend knows when to push new data. Should it be tied to one of the news servers?~~ Checking nframes and sending when it increases
     - ~~figureout the runstream method~~
     - ~~will have to tie it to a fake python generator~~
-- Options to do time lookup by index:
-    - checkox to switch to index
-    - set datarate
-    - set end condition (now minus time or something, still want to use grafana default time options)
+- ~~Options to do time lookup by index:~~
+    - ~~checkox to switch to index~~
+    - ~~set datarate~~
+    - ~~set end condition (now minus time or something, still want to use grafana default time options)~~
 - Smarter memory allocation for gd_getdata. Currently making a dummy call with `restype = void` to figure out how much data to allocate before actually calling the function 
 - improve thread-lock. Unclear what will happen when it is running as an actual server...
 - Build tools: Get it to work with mage (or write a sciprt that generates all the needed binaries to call it a actual plugin)

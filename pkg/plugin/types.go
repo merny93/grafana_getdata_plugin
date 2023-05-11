@@ -5,9 +5,13 @@ type InitSettings struct {
 }
 
 type QueryModel struct {
-	FieldName     string `json:"fieldName"`
-	TimeName      string `json:"timeName"`
-	StreamingBool bool   `json:"streamingBool"`
+	FieldName           string  `json:"fieldName"`
+	TimeName            string  `json:"timeName"`
+	StreamingBool       bool    `json:"streamingBool"`
+	IndexTimeOffsetType string  `json:"indexTimeOffsetType"`
+	IndexTimeOffset     int64   `json:"indexTimeOffset"`
+	SampleRate          float64 `json:"sampleRate"`
+	IndexByIndex        bool    `json:"indexByIndex"`
 }
 
 type AutocompleteRequest struct {

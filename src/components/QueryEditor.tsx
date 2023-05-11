@@ -1,6 +1,6 @@
 import React, {useState } from 'react';
-import {InlineFormLabel, AsyncSelect, LoadOptionsCallback, Checkbox} from '@grafana/ui';
-import { QueryEditorProps, SelectableValue } from '@grafana/data';
+import {InlineFormLabel, AsyncSelect, LoadOptionsCallback, Checkbox, Select, VerticalGroup, HorizontalGroup, DateTimePicker} from '@grafana/ui';
+import { QueryEditorProps, SelectableValue, dateTime } from '@grafana/data';
 import { DataSource } from '../datasource';
 import { MyDataSourceOptions, MyQuery } from '../types';
 type Props = QueryEditorProps<DataSource, MyQuery, MyDataSourceOptions>;
@@ -36,12 +36,22 @@ export function QueryEditor(props: Props) {
     return options;
   };
 
+  const indexTimeOffsetMapping: any = {
+    "fromStart" : "From start",
+    "fromEnd" : "From end",
+    "fromEndNow" : "From end now"
+  }
+
   const [timeName, setTimeName] = useState<SelectableValue<string>>({label: props.query.timeName, value: props.query.timeName});
   const [fieldName, setFieldName] = useState<SelectableValue<string>>({label: props.query.fieldName, value: props.query.fieldName});
   const [streamingBool, setStreamingBool] = useState<boolean>(props.query.streamingBool);
-
+  const [indexTimeOffsetType, setIndexTimeOffsetType] = useState<SelectableValue<string>>({label: indexTimeOffsetMapping[props.query.indexTimeOffsetType], value: props.query.indexTimeOffsetType});
+  const [indexByIndex, setIndexByIndex] = useState<boolean>(props.query.indexByIndex);
+  const [indexTimeOffset, setIndexTimeOffset] = useState<number>(props.query.indexTimeOffset);
   return (
     <div className="gf-form">
+      <VerticalGroup>
+        <HorizontalGroup>
       <InlineFormLabel width={7} tooltip="Enter field name">
           Field Name
         </InlineFormLabel>
@@ -68,7 +78,60 @@ export function QueryEditor(props: Props) {
           {e.currentTarget.checked ? setStreamingBool(true) : setStreamingBool(false); 
           props.onChange({ ...props.query, streamingBool: e.currentTarget.checked });
           }} 
-          label="Streaming" description="Enable streaming mode"/>
-    </div>
+          label="Streaming" description="Enable streaming mode"
+        />
+          </HorizontalGroup>
+          <HorizontalGroup>
+
+          <Checkbox value={indexByIndex} onChange={(e) => 
+          {e.currentTarget.checked ? setIndexByIndex(true) : setIndexByIndex(false); 
+          props.onChange({ ...props.query, indexByIndex: e.currentTarget.checked });
+          }} 
+          label="INDEX" description="Index time by INDEX"
+        />
+
+      <InlineFormLabel width={12} tooltip="">
+          Index time offset type
+        </InlineFormLabel>
+          <Select
+            options={[
+              {label: "From start", value: "fromStart"},
+              {label: "From end", value: "fromEnd" },
+              {label: "From end now", value: "fromEndNow" }
+            ]}
+            placeholder='How to offset the index time'
+            value={indexTimeOffsetType}
+            onChange={(v: SelectableValue) => {
+              setIndexTimeOffsetType(v);
+              props.onChange({ ...props.query, indexTimeOffsetType: v.value });
+            }}
+          />
+      <InlineFormLabel width={12} tooltip="">
+        sample rate
+      </InlineFormLabel>
+      <input
+        type="number"
+        value={props.query.sampleRate}
+        onChange={(e) => {
+          props.onChange({ ...props.query, sampleRate: parseFloat(e.currentTarget.value) });
+        }}
+      />
+      {/* <InlineFormLabel width={12} tooltip="">
+        Index time offset
+      </InlineFormLabel> */}
+      <DateTimePicker
+      label="Index time offset"
+      // minDate={minDateVal}
+      // maxDate={maxDateVal}
+      date={dateTime(indexTimeOffset*1000)}
+      // showSeconds={true}
+      onChange={(newValue) => {
+        setIndexTimeOffset(newValue.unix());
+        props.onChange({ ...props.query, indexTimeOffset: newValue.unix() });
+      }}
+    />
+      </HorizontalGroup>
+      </VerticalGroup>
+      </div>
   );
 }

@@ -93,6 +93,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
+	backend.Logger.Info(fmt.Sprintf("QueryModel: %+v\n", qm))
+
 	// create data frame response.
 	// For an overview on data frames and how grafana handles them:
 	// https://grafana.com/docs/grafana/latest/developers/plugins/data-frames/
@@ -113,8 +115,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		// this should convince grafana to stream
 		// pCtx.DataSourceInstanceSettings.UID
 		if qm.StreamingBool {
-			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String()
-			backend.Logger.Info(fmt.Sprintf("Creating a steram on %s", channalName))
+			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String() + "/" + qm.TimeName
+			backend.Logger.Info(fmt.Sprintf("Subscribing a steram on %s", channalName))
 			frame.Meta = &data.FrameMeta{
 				// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
 				// Channel: "ds/simon-myplugin-datasource/stream",
@@ -123,24 +125,41 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		}
 	}()
 
-	backend.Logger.Info(fmt.Sprintf("Interpreted time: %s, and field: %s. Will initiate streaming: %t\nGoing from: %s to: %s", qm.TimeName, qm.FieldName, qm.StreamingBool, query.TimeRange.From.Format(time.ANSIC), query.TimeRange.To.Format(time.ANSIC)))
-
 	//grab the starting time and the end time
-	//using the default TIME field here... might be wrong
-	firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.From.Unix()))
-	if firstFrame_float < 0 {
-		//if the start frame is negative, set it to 0
-		firstFrame_float = 0
-	}
-	endFrame := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.To.Unix()))
-	if endFrame < 0 {
-		//if last requested data is also in the past nothing to do just return the empty response
-		return response
-	}
+	var numFrames, firstFrame int
+	if qm.IndexByIndex {
+		// need to find first frame based on start time and num frames based on timerange * sample rate
+		switch qm.IndexTimeOffsetType {
+		case "fromStart":
+			firstFrame = int(float64(query.TimeRange.From.Unix()-qm.IndexTimeOffset) * qm.SampleRate)
+		case "fromEnd":
+			nFrames := GD_nframes(d.df)
+			firstFrame = nFrames - int(float64(qm.IndexTimeOffset-query.TimeRange.From.Unix())*qm.SampleRate)
+			// backend.Logger.Info(fmt.Sprintf("index offset: %d, time from: %d, frames: %d, firstFrame: %d", qm.IndexTimeOffset, query.TimeRange.From.Unix(), nFrames, firstFrame))
+		case "fromEndNow":
+			nFrames := GD_nframes(d.df)
+			firstFrame = nFrames - int(float64(time.Now().Unix()-query.TimeRange.From.Unix())*qm.SampleRate)
+			// backend.Logger.Info(fmt.Sprintf("Time now: %d, time from: %d, frames: %d, firstFrame: %d", time.Now().Unix(), query.TimeRange.From.Unix(), nFrames, firstFrame))
+		}
+		//get data does not like negative frame numbers
+		if firstFrame < 0 {
+			firstFrame = 0
+		}
+		numFrames = int(float64(query.TimeRange.To.Unix()-query.TimeRange.From.Unix()) * qm.SampleRate)
 
-	//this is what will be passed to getdata
-	numFrames := int(endFrame - firstFrame_float)
-	firstFrame := int(firstFrame_float)
+	} else {
+
+		firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.From.Unix()))
+		endFrame := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.To.Unix()))
+
+		//get data does not like negative frame numbers
+		if firstFrame_float < 0 {
+			firstFrame_float = 0
+		}
+
+		numFrames = int(endFrame - firstFrame_float)
+		firstFrame = int(firstFrame_float)
+	}
 
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
 	backend.Logger.Info(fmt.Sprintf("frames from: %v, %v", firstFrame, numFrames))
@@ -207,6 +226,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	// get the name of the name of the field, held in path as stream/NameOfField
 	chunks := strings.Split(request.Path, "/")
 	fieldName := chunks[1]
+	timeName := chunks[3]
 	interval, err := time.ParseDuration(chunks[2])
 	if err != nil {
 		return err
@@ -234,7 +254,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 					continue
 				}
-				unixTimeSlice := GD_getdata("TIME", d.df, newFrame-1, 0, 0, 1) //todo make time name a variable
+				unixTimeSlice := GD_getdata(timeName, d.df, newFrame-1, 0, 0, 1)
 				errStr = GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))

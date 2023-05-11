@@ -3,12 +3,20 @@ import { DataQuery, DataSourceJsonData } from '@grafana/data';
 export interface MyQuery extends DataQuery {
   fieldName: string;
   timeName: string;
+  indexByIndex: boolean;
   streamingBool: boolean;
+  indexTimeOffsetType: string;
+  indexTimeOffset: number;
+  sampleRate: number;
 }
 
 export const DEFAULT_QUERY: Partial<MyQuery> = {
   timeName: "TIME",
-  streamingBool: false
+  streamingBool: false,
+  indexTimeOffsetType: "fromEndNow",
+  sampleRate: 6,
+  indexTimeOffset: new Date().getUTCSeconds(),
+  indexByIndex: false,
 };
 
 /**
