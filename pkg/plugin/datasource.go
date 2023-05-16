@@ -130,8 +130,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 
 	//take a bit more data than u think you need for rounding reasons
 	//this makes sure that the screen gets filled
-	timeFrom := query.TimeRange.From.Unix()
-	timeTo := query.TimeRange.To.Unix() + 1
+	timeFrom := query.TimeRange.From.UnixMilli() / 1e3
+	timeTo := query.TimeRange.To.UnixMilli() / 1e3
 
 	if qm.IndexByIndex {
 		// need to find first frame based on start time and num frames based on timerange * sample rate
