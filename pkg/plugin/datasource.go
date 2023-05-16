@@ -127,30 +127,38 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 
 	//grab the starting time and the end time
 	var numFrames, firstFrame int
+
+	//take a bit more data than u think you need for rounding reasons
+	//this makes sure that the screen gets filled
+	timeFrom := query.TimeRange.From.Unix()
+	timeTo := query.TimeRange.To.Unix() + 1
+
 	if qm.IndexByIndex {
 		// need to find first frame based on start time and num frames based on timerange * sample rate
-		switch qm.IndexTimeOffsetType {
-		case "fromStart":
-			firstFrame = int(float64(query.TimeRange.From.Unix()-qm.IndexTimeOffset) * qm.SampleRate)
-		case "fromEnd":
+		if qm.IndexTimeOffsetType == "fromStart" {
+			firstFrame = int(float64(timeFrom-qm.IndexTimeOffset) * qm.SampleRate)
+		} else if qm.IndexTimeOffsetType == "fromEnd" {
 			nFrames := GD_nframes(d.df)
-			firstFrame = nFrames - int(float64(qm.IndexTimeOffset-query.TimeRange.From.Unix())*qm.SampleRate)
-			// backend.Logger.Info(fmt.Sprintf("index offset: %d, time from: %d, frames: %d, firstFrame: %d", qm.IndexTimeOffset, query.TimeRange.From.Unix(), nFrames, firstFrame))
-		case "fromEndNow":
+			firstFrame = nFrames - int(float64(qm.IndexTimeOffset-timeFrom)*qm.SampleRate)
+			// backend.Logger.Info(fmt.Sprintf("index offset: %d, time from: %d, frames: %d, firstFrame: %d", qm.IndexTimeOffset, timeFrom, nFrames, firstFrame))
+		} else if qm.IndexTimeOffsetType == "fromEndNow" {
 			nFrames := GD_nframes(d.df)
-			firstFrame = nFrames - int(float64(time.Now().Unix()-query.TimeRange.From.Unix())*qm.SampleRate)
-			// backend.Logger.Info(fmt.Sprintf("Time now: %d, time from: %d, frames: %d, firstFrame: %d", time.Now().Unix(), query.TimeRange.From.Unix(), nFrames, firstFrame))
+			firstFrame = nFrames - int(float64(time.Now().Unix()-timeFrom)*qm.SampleRate)
+			// backend.Logger.Info(fmt.Sprintf("Time now: %d, time from: %d, frames: %d, firstFrame: %d", time.Now().Unix(), timeFrom, nFrames, firstFrame))
 		}
 		//get data does not like negative frame numbers
 		if firstFrame < 0 {
 			firstFrame = 0
 		}
-		numFrames = int(float64(query.TimeRange.To.Unix()-query.TimeRange.From.Unix()) * qm.SampleRate)
+		numFrames = int(float64(timeTo-timeFrom) * qm.SampleRate)
 
 	} else {
 
-		firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.From.Unix()))
-		endFrame := GD_framenum(d.df, qm.TimeName, float64(query.TimeRange.To.Unix()))
+		firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(timeFrom))
+		endFrame := GD_framenum(d.df, qm.TimeName, float64(timeTo))
+
+		backend.Logger.Info(fmt.Sprintf("first frame: %v, end frame: %v", firstFrame_float, endFrame))
+		backend.Logger.Info(fmt.Sprintf("time from: %v, time to: %v", timeFrom, timeTo))
 
 		//get data does not like negative frame numbers
 		if firstFrame_float < 0 {
@@ -161,17 +169,22 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		firstFrame = int(firstFrame_float)
 	}
 
+	numFrames++ //send an extra frame just in case
+	if numFrames < 2 {
+		numFrames = 2
+	}
+
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
-	backend.Logger.Info(fmt.Sprintf("frames from: %v, %v", firstFrame, numFrames))
+	backend.Logger.Info(fmt.Sprintf("frames from: %v, num frames: %v", firstFrame, numFrames))
 
 	//grab the data and error check
-	dataSlice = GD_getdata(qm.FieldName, d.df, int(firstFrame), 0, numFrames, 0)
+	dataSlice = GD_getdata(qm.FieldName, d.df, int(firstFrame), numFrames)
 	errStr := GD_error(d.df)
 	if errStr != "" {
 		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("getdata error: %s", errStr))
 	}
-	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), 0, numFrames, 0)
+	unixTimeSlice := GD_getdata(qm.TimeName, d.df, int(firstFrame), numFrames)
 	errStr = GD_error(d.df)
 	if errStr != "" {
 		backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
@@ -183,24 +196,41 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		return response
 	}
 
+	backend.Logger.Info(fmt.Sprintf("FIRST len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+
 	//decimate the data
-	//first decimate the data and then decimate time to match, sometimes time is sampled at higher freqeuncy so use sample rate
-	var decimationFactor int = 1
-	//the excess sampleRate is just the ratio of extra time stamps
-	sampleRate := int(len(unixTimeSlice) / len(dataSlice))
+	// currently assuming that the time field has 1 sample per frame
+	//will decimate the data field by either a divisor or a multiple of samples per frame
+	// this means that the upsample for the time field will be clean and will work properly
+
+	spf := GD_spf(d.df, qm.FieldName)
+	var decimationFactor int
+
 	if query.MaxDataPoints < int64(len(dataSlice)) {
+		backend.Logger.Info("Decimating data")
+		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		//decimate the data by a factor which is either a divisor or a multiple of spf
 		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(query.MaxDataPoints)))
+		decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
+		backend.Logger.Info(fmt.Sprintf("decimation factor: %v", decimationFactor))
 		dataSlice = decimate(dataSlice, decimationFactor)
 	}
 	if len(dataSlice) < len(unixTimeSlice) {
-		unixTimeSlice = decimate(unixTimeSlice, decimationFactor*sampleRate)
+		backend.Logger.Info("decimating time")
+		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
+	} else if len(dataSlice) > len(unixTimeSlice) {
+		backend.Logger.Info("upsampling time")
+		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+		backend.Logger.Info("made it throught")
 	}
 
 	timeSlice = unixSlice2TimeSlice(unixTimeSlice)
 
 	backend.Logger.Info(fmt.Sprintf("Sending: %v values", len(timeSlice)))
 
-	//dataSlice and timeSlice are added to the response by the defer call. This means that
+	//dataSlice and timeSlice are added to the response by the defer call
 
 	return response
 }
@@ -234,8 +264,14 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer backend.Logger.Info(fmt.Sprintf("THE RUNSTREAM IS TERMINATED for endpoint: %s", request.Path))
+	tickerInterval := time.Duration(interval)
 
-	ticker := time.NewTicker(interval)
+	//limit the ticker interval to n second, right now set it to 3 cause why not
+	if tickerInterval < 1*time.Second {
+		tickerInterval = 3 * time.Second
+	}
+	ticker := time.NewTicker(tickerInterval)
+
 	var newFrame int
 	for {
 		select {
@@ -248,22 +284,72 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 			if newFrame > d.lastFrame[request.Path] {
 				//new data
 				//grab the data and error check
-				dataSlice := GD_getdata(fieldName, d.df, newFrame-1, 0, 0, 1)
+				dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[request.Path], newFrame-d.lastFrame[request.Path])
 				errStr := GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 					continue
 				}
-				unixTimeSlice := GD_getdata(timeName, d.df, newFrame-1, 0, 0, 1)
+
+				unixTimeSlice := GD_getdata(timeName, d.df, d.lastFrame[request.Path], newFrame-d.lastFrame[request.Path])
 				errStr = GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 					continue
 				}
-				//if there was no error but there was also no data
+
+				//if there was no error but there was also no data, dunoo how this would happen
 				if dataSlice == nil || unixTimeSlice == nil {
-					backend.Logger.Info("No data in selected time range")
+					backend.Logger.Info("No new data, odd")
 					continue
+				}
+
+				if len(unixTimeSlice) == 1 && len(dataSlice) > 1 {
+					backend.Logger.Info("Just got one frame but there are multiple samples in the data")
+					//there is just one new frame, but the sample rate is higher
+					//so we need to interpolate by grabing an extra past frame to get another time point
+					timeRange_0 := GD_getdata(timeName, d.df, d.lastFrame[request.Path]-1, 1)
+					timeSlope := (unixTimeSlice[0] - timeRange_0[0])
+					backend.Logger.Info(fmt.Sprintf("time slope: %v", timeSlope))
+					unixTimeSlice_tmp := make([]float64, len(dataSlice))
+					for i := 0; i < len(dataSlice)-1; i++ {
+						unixTimeSlice_tmp[i] = unixTimeSlice[0] + float64(i)*timeSlope/float64(len(dataSlice)-1)
+					}
+					unixTimeSlice = unixTimeSlice_tmp
+				}
+
+				//decimate the data
+				// currently assuming that the time field has 1 sample per frame
+				if len(dataSlice) > 1 {
+					// check what the interval is
+					// if it is less than the interval of the stream, then we need to decimate
+
+					spf := GD_spf(d.df, fieldName)
+
+					dataInterval := unixTimeSlice[1] - unixTimeSlice[0] // should be guaranteed at least 2 points here since we upsampled if there was only one above
+
+					// however if there is more points in the data than in the time true interval is given by the spf
+					if len(unixTimeSlice) < len(dataSlice) {
+						dataInterval = dataInterval / float64(spf)
+					}
+					dataInterval = dataInterval / 2 // looks like this is needed for some reason..... optimistic computation of interval on front end is to blame
+
+					if dataInterval < interval.Seconds() {
+						backend.Logger.Info("Decimating data in the stream")
+						//decimate the data by a factor which is either a divisor or a multiple of spf
+						decimationFactor := int(math.Ceil(interval.Seconds() / dataInterval))
+						backend.Logger.Info(fmt.Sprintf("inetrvals: %v, %v", interval.Seconds(), dataInterval))
+						decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
+						backend.Logger.Info(fmt.Sprintf("decimation factor in stream: %v", decimationFactor))
+						dataSlice = decimate(dataSlice, decimationFactor)
+					}
+					if len(dataSlice) < len(unixTimeSlice) {
+						backend.Logger.Info("decimating time in the stream")
+						unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
+					} else if len(dataSlice) > len(unixTimeSlice) {
+						backend.Logger.Info("upsampling time in the stream")
+						unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+					}
 				}
 
 				timeSlice := unixSlice2TimeSlice(unixTimeSlice)
@@ -280,7 +366,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				d.lastFrame[request.Path] = newFrame
 
 				//debuggg
-				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s", request.Path))
+				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
 			}
 		}
 	}
@@ -326,10 +412,10 @@ func (d *Datasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequ
 
 	var status = backend.HealthStatusOk
 	var message = "Data source is working"
-
-	res := GD_getdata("INDEX", d.df, 0, 0, 0, 1)
+	dummyArray := make([]float64, 1)
+	res := GD_getdata_c("INDEX", d.df, 0, 0, 0, 1, dummyArray)
 	errStr := GD_error(d.df)
-	if errStr != "" || res == nil {
+	if errStr != "" || res == 0 {
 		status = backend.HealthStatusError
 		message = fmt.Sprintf("getdata error: %s", errStr)
 	}

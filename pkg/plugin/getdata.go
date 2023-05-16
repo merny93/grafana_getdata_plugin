@@ -31,7 +31,38 @@ func GD_open(dir_file_name string) Dirfile {
 	return Dirfile{df: df, mutex: &sync.Mutex{}}
 }
 
-func GD_getdata(field_name string, df Dirfile, first_frame, first_sample, num_frames, num_samples int) []float64 {
+func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []float64 {
+	//i got rid of sample calles cause i dont think we need them and not sure what to do with them anyways...
+	//same as GD_getdata_ but gets the size by computing the size from spf and nframes
+	//also it does not need the mutex cause the subcalls have it
+
+	if num_frames <= 0 {
+		//this is weird, lets not think about it
+		return nil
+	}
+
+	spf := GD_spf(df, field_name)
+	nframes := GD_nframes(df)
+	if first_frame+num_frames > nframes {
+		num_frames = nframes - first_frame
+	}
+
+	res := make([]float64, num_frames*spf)
+
+	// convert the field name to c string
+	field_name_c := C.CString(field_name)
+	defer C.free(unsafe.Pointer(field_name_c))
+
+	defer df.mutex.Unlock()
+	df.mutex.Lock()
+
+	C.gd_getdata(df.df, field_name_c, C.long(first_frame), 0, C.ulong(num_frames), 0, C.GD_FLOAT64, unsafe.Pointer(&res[0]))
+
+	return res
+}
+
+func GD_getdata_c(field_name string, df Dirfile, first_frame, first_sample, num_frames, num_samples int, result []float64) int {
+	//leave the responsability of allocating the result array to the caller
 
 	defer df.mutex.Unlock()
 	df.mutex.Lock()
@@ -40,20 +71,10 @@ func GD_getdata(field_name string, df Dirfile, first_frame, first_sample, num_fr
 	field_name_c := C.CString(field_name)
 	defer C.free(unsafe.Pointer(field_name_c))
 
-	//make dummy result array pointer
-	var dummy_result *float64
-	num_elements := C.gd_getdata(df.df, field_name_c, C.long(first_frame), C.long(first_sample), C.ulong(num_frames), C.ulong(num_samples), C.GD_NULL, unsafe.Pointer(dummy_result))
-
-	if num_elements == 0 {
-		fmt.Println("Error: field not found")
-		return nil
-	}
-	//make result array
-	result := make([]float64, num_elements)
 	//pass the result array as a pointer using the first element of result assuming its contiguous
-	C.gd_getdata(df.df, field_name_c, C.long(first_frame), C.long(first_sample), C.ulong(num_frames), C.ulong(num_samples), C.GD_FLOAT64, unsafe.Pointer(&result[0]))
+	numSamples := C.gd_getdata(df.df, field_name_c, C.long(first_frame), C.long(first_sample), C.ulong(num_frames), C.ulong(num_samples), C.GD_FLOAT64, unsafe.Pointer(&result[0]))
 
-	return result
+	return int(numSamples)
 }
 
 func GD_close(df Dirfile) {
@@ -131,4 +152,14 @@ func GD_nframes(df Dirfile) int {
 	(df.mutex).Lock()
 
 	return int(C.gd_nframes(df.df))
+}
+
+func GD_spf(df Dirfile, fieldName string) int {
+	defer (df.mutex).Unlock()
+	(df.mutex).Lock()
+
+	fieldName_c := C.CString(fieldName)
+	defer C.free(unsafe.Pointer(fieldName_c))
+
+	return int(C.gd_spf(df.df, fieldName_c))
 }
