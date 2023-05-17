@@ -206,11 +206,13 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	spf := GD_spf(d.df, qm.FieldName)
 	var decimationFactor int
 
-	if query.MaxDataPoints < int64(len(dataSlice)) {
+	maxDataPoints := query.MaxDataPoints
+
+	if maxDataPoints < int64(len(dataSlice)) {
 		backend.Logger.Info("Decimating data")
 		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
 		//decimate the data by a factor which is either a divisor or a multiple of spf
-		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(query.MaxDataPoints)))
+		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(maxDataPoints)))
 		decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
 		backend.Logger.Info(fmt.Sprintf("decimation factor: %v", decimationFactor))
 		dataSlice = decimate(dataSlice, decimationFactor)
@@ -263,7 +265,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	}
 
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
-	defer backend.Logger.Info(fmt.Sprintf("THE RUNSTREAM IS TERMINATED for endpoint: %s", request.Path))
+	defer backend.Logger.Info(fmt.Sprintf("Look for a context done above for endpoint: %s", request.Path))
 	tickerInterval := time.Duration(interval)
 
 	//limit the ticker interval to n second, right now set it to 3 cause why not
@@ -335,19 +337,19 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 					dataInterval = dataInterval / 2 // looks like this is needed for some reason..... optimistic computation of interval on front end is to blame
 
 					if dataInterval < interval.Seconds() {
-						backend.Logger.Info("Decimating data in the stream")
 						//decimate the data by a factor which is either a divisor or a multiple of spf
 						decimationFactor := int(math.Ceil(interval.Seconds() / dataInterval))
 						backend.Logger.Info(fmt.Sprintf("inetrvals: %v, %v", interval.Seconds(), dataInterval))
 						decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
-						backend.Logger.Info(fmt.Sprintf("decimation factor in stream: %v", decimationFactor))
+						//if the decimation factor is larger than the data slice, then just send one value
+						if decimationFactor > len(dataSlice) {
+							decimationFactor = len(dataSlice)
+						}
 						dataSlice = decimate(dataSlice, decimationFactor)
 					}
 					if len(dataSlice) < len(unixTimeSlice) {
-						backend.Logger.Info("decimating time in the stream")
 						unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
 					} else if len(dataSlice) > len(unixTimeSlice) {
-						backend.Logger.Info("upsampling time in the stream")
 						unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
 					}
 				}
