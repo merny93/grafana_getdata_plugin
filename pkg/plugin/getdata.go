@@ -11,8 +11,11 @@ import "C"
 
 import (
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"unsafe"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 type GD_dirfile *C.DIRFILE
@@ -63,6 +66,12 @@ func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []fl
 
 	defer df.mutex.Unlock()
 	df.mutex.Lock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			backend.Logger.Error("Recovered in GD_getdata", r, debug.Stack())
+		}
+	}()
 
 	C.gd_getdata(df.df, field_name_c, C.long(first_frame), 0, C.ulong(num_frames), 0, C.GD_FLOAT64, unsafe.Pointer(&res[0]))
 

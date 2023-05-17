@@ -1,8 +1,11 @@
 package plugin
 
 import (
+	"errors"
 	"math"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 func decimate(data []float64, decimationFactor int) []float64 {
@@ -27,8 +30,11 @@ func unixSlice2TimeSlice(unixTimeSlice []float64) []time.Time {
 	return timeSlice
 }
 
-func upsample(data []float64, upsampleFactor int) []float64 {
-
+func upsample(data []float64, upsampleFactor int) ([]float64, error) {
+	if len(data) < 2 {
+		backend.Logger.Info("data length must be at least 2 to upsample")
+		return nil, errors.New("data length must be at least 2 to upsample")
+	}
 	dataUpsampled := make([]float64, len(data)*upsampleFactor)
 	jdx := -1
 	for idx := 0; idx < len(dataUpsampled); idx++ {
@@ -47,7 +53,7 @@ func upsample(data []float64, upsampleFactor int) []float64 {
 			}
 		}
 	}
-	return dataUpsampled
+	return dataUpsampled, nil
 }
 
 func compatibleDecimationFactor(decimationFactor int, spf int) int {

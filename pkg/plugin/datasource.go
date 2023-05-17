@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -28,8 +30,9 @@ var (
 )
 
 type Datasource struct {
-	df        Dirfile
-	lastFrame map[string]int
+	df         Dirfile
+	lastFrame  sync.Map
+	senderLock *sync.Mutex
 }
 
 // NewDatasource creates a new datasource instance.
@@ -45,7 +48,7 @@ func NewDatasource(settings backend.DataSourceInstanceSettings) (instancemgmt.In
 	}
 	backend.Logger.Info("Attempting to open database located at: " + fmt.Sprint(params.DatabaseLocation))
 	df := GD_open(params.DatabaseLocation)
-	return &Datasource{df: df, lastFrame: make(map[string]int)}, nil
+	return &Datasource{df: df, lastFrame: sync.Map{}, senderLock: &sync.Mutex{}}, nil
 }
 
 // Datasource is an example datasource which can respond to data queries, reports
@@ -240,7 +243,11 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	} else if len(dataSlice) > len(unixTimeSlice) {
 		backend.Logger.Info("upsampling time")
 		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
-		unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+		unixTimeSlice, err = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+		if err != nil {
+			backend.Logger.Error(fmt.Sprintf("Error upsampling time: %v", err))
+			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Error upsampling time: %v", err))
+		}
 		backend.Logger.Info("made it throught")
 	}
 	if qm.TimeType {
@@ -263,7 +270,7 @@ func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.Subsc
 	status := backend.SubscribeStreamStatusOK
 
 	//write down the last frame
-	d.lastFrame[request.Path] = GD_nframes(d.df) - 1
+	d.lastFrame.Store(request.Path, GD_nframes(d.df)-1)
 
 	return &backend.SubscribeStreamResponse{Status: status}, nil
 }
@@ -288,7 +295,14 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	}
 
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
-	defer backend.Logger.Info(fmt.Sprintf("Look for a context done above for endpoint: %s", request.Path))
+	defer func() {
+		if r := recover(); r != nil {
+			backend.Logger.Error("Panic: %v\n%s", r, debug.Stack())
+		} else {
+			backend.Logger.Info("No panic")
+		}
+	}()
+
 	tickerInterval := time.Duration(interval)
 
 	//limit the ticker interval to n second, right now set it to 3 cause why not
@@ -301,22 +315,24 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	for {
 		select {
 		case <-ctx.Done():
-			backend.Logger.Info("Context done")
+			backend.Logger.Info(fmt.Sprintf("Context done on stream %s", request.Path))
 			ticker.Stop()
 			return nil
 		case <-ticker.C:
 			newFrame = GD_nframes(d.df)
-			if newFrame > d.lastFrame[request.Path] {
+			lastFrameInterface, _ := d.lastFrame.Load(request.Path)
+			lastFrame := lastFrameInterface.(int)
+			if newFrame > lastFrame {
 				//new data
 				//grab the data and error check
-				dataSlice := GD_getdata(fieldName, d.df, d.lastFrame[request.Path], newFrame-d.lastFrame[request.Path])
+				dataSlice := GD_getdata(fieldName, d.df, lastFrame, newFrame-lastFrame)
 				errStr := GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
 					continue
 				}
 
-				unixTimeSlice := GD_getdata(timeName, d.df, d.lastFrame[request.Path], newFrame-d.lastFrame[request.Path])
+				unixTimeSlice := GD_getdata(timeName, d.df, lastFrame, newFrame-lastFrame)
 				errStr = GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
@@ -355,12 +371,21 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 						backend.Logger.Info(fmt.Sprintf("decimating time in stream factor: %v", len(unixTimeSlice)/len(dataSlice)))
 						unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
 					} else if len(dataSlice) > len(unixTimeSlice) {
-						backend.Logger.Info(fmt.Sprintf("upsampling time in stream factor: %v", len(dataSlice)/len(unixTimeSlice)))
+						backend.Logger.Info(fmt.Sprintf("upsampling time in stream factor: %v, there are %v datapoints", len(dataSlice)/len(unixTimeSlice), len(unixTimeSlice)))
 						if len(unixTimeSlice) == 1 {
 							//hard to upsample with just one data point, lets grab another one from the past
 							unixTimeSlice = GD_getdata(timeName, d.df, newFrame-2, 2)
+							errStr = GD_error(d.df)
+							if errStr != "" {
+								backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
+								continue
+							}
 						}
-						unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+						unixTimeSlice, err = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
+						if err != nil {
+							backend.Logger.Info(fmt.Sprintf("Error upsampling time in stream: %v", err))
+							continue
+						}
 					}
 				}
 				var timeSlice interface{}
@@ -370,19 +395,33 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 					timeSlice = unixTimeSlice
 				}
 
+				// backend.Logger.Info(fmt.Sprintf("Sending: %v valuesdata, %v values time", len(dataSlice), len(unixTimeSlice)))
+
 				frame := data.NewFrame("response")
+
+				// backend.Logger.Info("made frame")
 				frame.Fields = append(frame.Fields,
 					data.NewField(timeNameField, nil, timeSlice),
 					data.NewField(fieldName, nil, dataSlice),
 				)
 
-				sender.SendFrame(frame, data.IncludeAll)
+				backend.Logger.Info("filled frame")
 
-				//update the last frame
-				d.lastFrame[request.Path] = newFrame
+				d.senderLock.Lock()
+				err = sender.SendFrame(frame, data.IncludeAll)
+				d.senderLock.Unlock()
+				if err != nil {
+					backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
+					continue
+				}
+
+				// backend.Logger.Info("sent frame")
 
 				//debuggg
 				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
+				//update the last frame
+				d.lastFrame.Store(request.Path, newFrame)
+
 			}
 		}
 	}
