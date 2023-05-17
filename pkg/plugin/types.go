@@ -12,6 +12,7 @@ type QueryModel struct {
 	IndexTimeOffset     int64   `json:"indexTimeOffset"`
 	SampleRate          float64 `json:"sampleRate"`
 	IndexByIndex        bool    `json:"indexByIndex"`
+	TimeType            bool    `json:"timeType"`
 }
 
 type AutocompleteRequest struct {

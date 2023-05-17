@@ -43,10 +43,18 @@ func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []fl
 
 	spf := GD_spf(df, field_name)
 	nframes := GD_nframes(df)
+
+	//if the first frame is out of bounds, return nil
+	if first_frame >= nframes-1 {
+		return nil
+	}
+
+	//get number of frames to read
 	if first_frame+num_frames > nframes {
 		num_frames = nframes - first_frame
 	}
 
+	//allocate the result array
 	res := make([]float64, num_frames*spf)
 
 	// convert the field name to c string

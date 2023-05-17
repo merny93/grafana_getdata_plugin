@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,8 +70,12 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	response := backend.NewQueryDataResponse()
 
 	// loop over queries and execute them individually.
-	for _, q := range req.Queries {
-		res := d.query(ctx, req.PluginContext, q)
+	for i, q := range req.Queries {
+		appendString := ""
+		if len(req.Queries) > 1 {
+			appendString = fmt.Sprintf("%d", i)
+		}
+		res := d.query(ctx, req.PluginContext, q, appendString)
 
 		// save the response in a hashmap
 		// based on with RefID as identifier
@@ -80,7 +85,7 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
+func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery, timeAppend string) backend.DataResponse {
 
 	var response backend.DataResponse
 
@@ -101,22 +106,33 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	frame := data.NewFrame("response")
 	response.Frames = append(response.Frames, frame)
 
-	//create the arrays which we will return eventually
-	var timeSlice []time.Time
+	//create the arrays which we will return eventually}
+	var timeSlice interface{}
 	var dataSlice []float64
 
 	// add fields and frame to the response. Do this now so the response gets sent back correctly always
+	appendString := ""
+	if timeAppend != "" {
+		appendString = "__" + timeAppend
+	}
 	defer func() {
+		if dataSlice == nil || timeSlice == nil {
+			dataSlice = make([]float64, 0)
+			if qm.TimeType {
+				timeSlice = make([]time.Time, 0)
+			} else {
+				timeSlice = make([]float64, 0)
+			}
+		}
 		frame.Fields = append(frame.Fields,
-			data.NewField("time", nil, timeSlice),
+			data.NewField(qm.TimeName+appendString, nil, timeSlice),
 			data.NewField(qm.FieldName, nil, dataSlice),
 		)
 		// Add the "Channel" field to the frame metadata
 		// this should convince grafana to stream
 		// pCtx.DataSourceInstanceSettings.UID
 		if qm.StreamingBool {
-			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String() + "/" + qm.TimeName
-			backend.Logger.Info(fmt.Sprintf("Subscribing a steram on %s", channalName))
+			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String() + "/" + qm.TimeName + appendString + "/" + fmt.Sprintf("%t", qm.TimeType)
 			frame.Meta = &data.FrameMeta{
 				// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
 				// Channel: "ds/simon-myplugin-datasource/stream",
@@ -206,7 +222,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	spf := GD_spf(d.df, qm.FieldName)
 	var decimationFactor int
 
-	maxDataPoints := query.MaxDataPoints
+	maxDataPoints := query.MaxDataPoints // 4 //send 4 times less data than u think u need to
 
 	if maxDataPoints < int64(len(dataSlice)) {
 		backend.Logger.Info("Decimating data")
@@ -227,10 +243,12 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
 		backend.Logger.Info("made it throught")
 	}
-
-	timeSlice = unixSlice2TimeSlice(unixTimeSlice)
-
-	backend.Logger.Info(fmt.Sprintf("Sending: %v values", len(timeSlice)))
+	if qm.TimeType {
+		timeSlice = unixSlice2TimeSlice(unixTimeSlice)
+	} else {
+		timeSlice = unixTimeSlice
+	}
+	backend.Logger.Info(fmt.Sprintf("Sending: %v values", len(dataSlice)))
 
 	//dataSlice and timeSlice are added to the response by the defer call
 
@@ -258,8 +276,13 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	// get the name of the name of the field, held in path as stream/NameOfField
 	chunks := strings.Split(request.Path, "/")
 	fieldName := chunks[1]
-	timeName := chunks[3]
+	timeNameField := chunks[3]
+	timeName := strings.Split(timeNameField, "__")[0]
 	interval, err := time.ParseDuration(chunks[2])
+	if err != nil {
+		return err
+	}
+	timeType, err := strconv.ParseBool(chunks[4])
 	if err != nil {
 		return err
 	}
@@ -306,20 +329,6 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 					continue
 				}
 
-				if len(unixTimeSlice) == 1 && len(dataSlice) > 1 {
-					backend.Logger.Info("Just got one frame but there are multiple samples in the data")
-					//there is just one new frame, but the sample rate is higher
-					//so we need to interpolate by grabing an extra past frame to get another time point
-					timeRange_0 := GD_getdata(timeName, d.df, d.lastFrame[request.Path]-1, 1)
-					timeSlope := (unixTimeSlice[0] - timeRange_0[0])
-					backend.Logger.Info(fmt.Sprintf("time slope: %v", timeSlope))
-					unixTimeSlice_tmp := make([]float64, len(dataSlice))
-					for i := 0; i < len(dataSlice)-1; i++ {
-						unixTimeSlice_tmp[i] = unixTimeSlice[0] + float64(i)*timeSlope/float64(len(dataSlice)-1)
-					}
-					unixTimeSlice = unixTimeSlice_tmp
-				}
-
 				//decimate the data
 				// currently assuming that the time field has 1 sample per frame
 				if len(dataSlice) > 1 {
@@ -328,14 +337,8 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 
 					spf := GD_spf(d.df, fieldName)
 
-					dataInterval := unixTimeSlice[1] - unixTimeSlice[0] // should be guaranteed at least 2 points here since we upsampled if there was only one above
-
-					// however if there is more points in the data than in the time true interval is given by the spf
-					if len(unixTimeSlice) < len(dataSlice) {
-						dataInterval = dataInterval / float64(spf)
-					}
-					dataInterval = dataInterval / 2 // looks like this is needed for some reason..... optimistic computation of interval on front end is to blame
-
+					dataInterval := tickerInterval.Seconds() / float64(len(dataSlice))
+					// dataInterval = dataInterval / 4 //just to be safe
 					if dataInterval < interval.Seconds() {
 						//decimate the data by a factor which is either a divisor or a multiple of spf
 						decimationFactor := int(math.Ceil(interval.Seconds() / dataInterval))
@@ -345,20 +348,31 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 						if decimationFactor > len(dataSlice) {
 							decimationFactor = len(dataSlice)
 						}
+						backend.Logger.Info(fmt.Sprintf("decimation factor in stream of data: %v", decimationFactor))
 						dataSlice = decimate(dataSlice, decimationFactor)
 					}
 					if len(dataSlice) < len(unixTimeSlice) {
+						backend.Logger.Info(fmt.Sprintf("decimating time in stream factor: %v", len(unixTimeSlice)/len(dataSlice)))
 						unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
 					} else if len(dataSlice) > len(unixTimeSlice) {
+						backend.Logger.Info(fmt.Sprintf("upsampling time in stream factor: %v", len(dataSlice)/len(unixTimeSlice)))
+						if len(unixTimeSlice) == 1 {
+							//hard to upsample with just one data point, lets grab another one from the past
+							unixTimeSlice = GD_getdata(timeName, d.df, newFrame-2, 2)
+						}
 						unixTimeSlice = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
 					}
 				}
-
-				timeSlice := unixSlice2TimeSlice(unixTimeSlice)
+				var timeSlice interface{}
+				if timeType {
+					timeSlice = unixSlice2TimeSlice(unixTimeSlice)
+				} else {
+					timeSlice = unixTimeSlice
+				}
 
 				frame := data.NewFrame("response")
 				frame.Fields = append(frame.Fields,
-					data.NewField("time", nil, timeSlice),
+					data.NewField(timeNameField, nil, timeSlice),
 					data.NewField(fieldName, nil, dataSlice),
 				)
 

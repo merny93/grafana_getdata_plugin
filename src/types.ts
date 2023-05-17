@@ -8,6 +8,7 @@ export interface MyQuery extends DataQuery {
   indexTimeOffsetType: string;
   indexTimeOffset: number;
   sampleRate: number;
+  timeType: boolean;
 }
 
 export const DEFAULT_QUERY: Partial<MyQuery> = {
@@ -17,6 +18,7 @@ export const DEFAULT_QUERY: Partial<MyQuery> = {
   sampleRate: 6,
   indexTimeOffset: new Date().getUTCSeconds(),
   indexByIndex: false,
+  timeType: true,
 };
 
 /**

@@ -48,6 +48,7 @@ export function QueryEditor(props: Props) {
   const [indexTimeOffsetType, setIndexTimeOffsetType] = useState<SelectableValue<string>>({label: indexTimeOffsetMapping[props.query.indexTimeOffsetType], value: props.query.indexTimeOffsetType});
   const [indexByIndex, setIndexByIndex] = useState<boolean>(props.query.indexByIndex);
   const [indexTimeOffset, setIndexTimeOffset] = useState<number>(props.query.indexTimeOffset);
+  const [timeType, setTimeType] = useState<boolean>(props.query.timeType);
   return (
     <div className="gf-form">
       <VerticalGroup>
@@ -62,6 +63,12 @@ export function QueryEditor(props: Props) {
           onChange={onFieldNameChange}
           allowCreateWhileLoading
           openMenuOnFocus
+        />
+        <Checkbox value={timeType} onChange={(e) => 
+          {e.currentTarget.checked ? setTimeType(true) : setTimeType(false); 
+          props.onChange({ ...props.query, timeType: e.currentTarget.checked });
+          }} 
+          label="time type" description="Cast x axis to time object"
         />
       <InlineFormLabel width={12} tooltip="Enter time field name">
           Time Field Name
