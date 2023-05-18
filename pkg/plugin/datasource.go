@@ -118,6 +118,14 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	if timeAppend != "" {
 		appendString = "__" + timeAppend
 	}
+	// decide if we are converting index to time object
+	indexConvert := false
+	sampleRateSend := 0.0
+	if qm.TimeType && qm.TimeName == "INDEX" && qm.IndexByIndex && qm.IndexTimeOffsetType == "fromEndNow" {
+		indexConvert = true
+		sampleRateSend = qm.SampleRate
+	}
+
 	defer func() {
 		if dataSlice == nil || timeSlice == nil {
 			dataSlice = make([]float64, 0)
@@ -135,11 +143,12 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		// this should convince grafana to stream
 		// pCtx.DataSourceInstanceSettings.UID
 		if qm.StreamingBool {
-			channalName := "ds/" + pCtx.DataSourceInstanceSettings.UID + "/stream/" + qm.FieldName + "/" + query.Interval.String() + "/" + qm.TimeName + appendString + "/" + fmt.Sprintf("%t", qm.TimeType)
+			//turns out the front end is "optimistic" in the interval calculation
+			interval := time.Duration(math.Max(float64(query.Interval.Milliseconds()), float64(query.TimeRange.To.UnixMilli()-query.TimeRange.From.UnixMilli())/float64(query.MaxDataPoints)) * 1e6)
+			channelName := fmt.Sprintf("ds/%s/steam/%s/%s/%s/%t/%.3f", pCtx.DataSourceInstanceSettings.UID, qm.FieldName, interval.String(), qm.TimeName+appendString, qm.TimeType, sampleRateSend)
+			backend.Logger.Info(fmt.Sprintf("Requesting stream on hannel name: %s", channelName))
 			frame.Meta = &data.FrameMeta{
-				// Channel: "ds/fcfd8594-00f2-4cdb-8519-7ab60b5403b7/stream",
-				// Channel: "ds/simon-myplugin-datasource/stream",
-				Channel: channalName,
+				Channel: channelName,
 			}
 		}
 	}()
@@ -176,8 +185,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		firstFrame_float := GD_framenum(d.df, qm.TimeName, float64(timeFrom))
 		endFrame := GD_framenum(d.df, qm.TimeName, float64(timeTo))
 
-		backend.Logger.Info(fmt.Sprintf("first frame: %v, end frame: %v", firstFrame_float, endFrame))
-		backend.Logger.Info(fmt.Sprintf("time from: %v, time to: %v", timeFrom, timeTo))
+		// backend.Logger.Info(fmt.Sprintf("first frame: %v, end frame: %v", firstFrame_float, endFrame))
+		// backend.Logger.Info(fmt.Sprintf("time from: %v, time to: %v", timeFrom, timeTo))
 
 		//get data does not like negative frame numbers
 		if firstFrame_float < 0 {
@@ -188,9 +197,16 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		firstFrame = int(firstFrame_float)
 	}
 
-	numFrames++ //send an extra frame just in case
+	//send an extra frame just in case, never less than 2 frames
+	numFrames++
 	if numFrames < 2 {
 		numFrames = 2
+	}
+
+	//block of code to make sure that we dont ask for more data than we have
+	lastFrame := GD_nframes(d.df)
+	if firstFrame+numFrames > lastFrame {
+		numFrames = lastFrame - firstFrame
 	}
 
 	//shoudl figure out the other stuff here like how to compute the number of frames and samples
@@ -211,11 +227,11 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	}
 	//if there was no error but there was also no data
 	if dataSlice == nil || unixTimeSlice == nil {
-		backend.Logger.Info("No data in selected time range")
+		backend.Logger.Warn("No data in selected time range")
 		return response
 	}
 
-	backend.Logger.Info(fmt.Sprintf("FIRST len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+	// backend.Logger.Info(fmt.Sprintf("FIRST len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
 
 	//decimate the data
 	// currently assuming that the time field has 1 sample per frame
@@ -228,8 +244,8 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	maxDataPoints := query.MaxDataPoints // 4 //send 4 times less data than u think u need to
 
 	if maxDataPoints < int64(len(dataSlice)) {
-		backend.Logger.Info("Decimating data")
-		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		// backend.Logger.Info("Decimating data")
+		// backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
 		//decimate the data by a factor which is either a divisor or a multiple of spf
 		decimationFactor = int(math.Ceil(float64(len(dataSlice)) / float64(maxDataPoints)))
 		decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
@@ -237,25 +253,28 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		dataSlice = decimate(dataSlice, decimationFactor)
 	}
 	if len(dataSlice) < len(unixTimeSlice) {
-		backend.Logger.Info("decimating time")
-		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		// backend.Logger.Info("decimating time")
+		// backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
 		unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
 	} else if len(dataSlice) > len(unixTimeSlice) {
-		backend.Logger.Info("upsampling time")
-		backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
+		// backend.Logger.Info("upsampling time")
+		// backend.Logger.Info(fmt.Sprintf("len data: %v, len time: %v", len(dataSlice), len(unixTimeSlice)))
 		unixTimeSlice, err = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
 		if err != nil {
 			backend.Logger.Error(fmt.Sprintf("Error upsampling time: %v", err))
 			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Error upsampling time: %v", err))
 		}
-		backend.Logger.Info("made it throught")
+		// backend.Logger.Info("made it throught")
 	}
-	if qm.TimeType {
+	if indexConvert {
+		// indexing by index from end now we can convert index into a time object
+		timeSlice = indexSlice2TimeSlice(unixTimeSlice, qm.SampleRate, time.Now())
+	} else if qm.TimeType {
 		timeSlice = unixSlice2TimeSlice(unixTimeSlice)
 	} else {
 		timeSlice = unixTimeSlice
 	}
-	backend.Logger.Info(fmt.Sprintf("Sending: %v values", len(dataSlice)))
+	backend.Logger.Info(fmt.Sprintf("Sending: %v, %v values. For querry %+v", len(unixTimeSlice), len(dataSlice), qm))
 
 	//dataSlice and timeSlice are added to the response by the defer call
 
@@ -293,6 +312,10 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	if err != nil {
 		return err
 	}
+	sampleRate, err := strconv.ParseFloat(chunks[5], 64)
+	if err != nil {
+		return err
+	}
 
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer func() {
@@ -319,30 +342,74 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 			ticker.Stop()
 			return nil
 		case <-ticker.C:
-			newFrame = GD_nframes(d.df)
-			lastFrameInterface, _ := d.lastFrame.Load(request.Path)
-			lastFrame := lastFrameInterface.(int)
-			if newFrame > lastFrame {
+			func() {
+				newFrame = GD_nframes(d.df)
+				lastFrameInterface, _ := d.lastFrame.Load(request.Path)
+				lastFrame := lastFrameInterface.(int)
+
+				//create the response objects out here
+				var timeSlice interface{}
+				var unixTimeSlice []float64
+				var dataSlice []float64
+				frame := data.NewFrame("response")
+
+				defer func() {
+					if sampleRate != 0 {
+						// indexing by index from end now we can convert index into a time object
+						// backend.Logger.Info("comparing a float to an int worked shockingly", sampleRate)
+						timeSlice = indexSlice2TimeSlice(unixTimeSlice, sampleRate, time.Now())
+					} else if timeType {
+						timeSlice = unixSlice2TimeSlice(unixTimeSlice)
+					} else {
+						timeSlice = unixTimeSlice
+					}
+
+					frame.Fields = append(frame.Fields,
+						data.NewField(timeNameField, nil, timeSlice),
+						data.NewField(fieldName, nil, dataSlice),
+					)
+
+					d.senderLock.Lock()
+					defer d.senderLock.Unlock()
+					err = sender.SendFrame(frame, data.IncludeAll)
+
+					if err != nil {
+						backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
+						return
+					}
+
+					//update the last frame
+					d.lastFrame.Store(request.Path, newFrame)
+
+					backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
+
+				}()
+
+				if newFrame <= lastFrame {
+					backend.Logger.Info("No new data, sending empty frame")
+					return
+				}
 				//new data
 				//grab the data and error check
-				dataSlice := GD_getdata(fieldName, d.df, lastFrame, newFrame-lastFrame)
+				dataSlice = GD_getdata(fieldName, d.df, lastFrame, newFrame-lastFrame)
 				errStr := GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
-					continue
+					return
 				}
 
-				unixTimeSlice := GD_getdata(timeName, d.df, lastFrame, newFrame-lastFrame)
+				unixTimeSlice = GD_getdata(timeName, d.df, lastFrame, newFrame-lastFrame)
 				errStr = GD_error(d.df)
 				if errStr != "" {
 					backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
-					continue
+					return
 				}
 
-				//if there was no error but there was also no data, dunoo how this would happen
-				if dataSlice == nil || unixTimeSlice == nil {
-					backend.Logger.Info("No new data, odd")
-					continue
+				//There was data lets do something
+				if dataSlice == nil && unixTimeSlice == nil {
+					backend.Logger.Info("No data, but frame number went up, strange...")
+					d.lastFrame.Store(request.Path, newFrame)
+					return
 				}
 
 				//decimate the data
@@ -358,71 +425,38 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 					if dataInterval < interval.Seconds() {
 						//decimate the data by a factor which is either a divisor or a multiple of spf
 						decimationFactor := int(math.Ceil(interval.Seconds() / dataInterval))
-						backend.Logger.Info(fmt.Sprintf("inetrvals: %v, %v", interval.Seconds(), dataInterval))
+						// backend.Logger.Info(fmt.Sprintf("inetrvals: %v, %v", interval.Seconds(), dataInterval))
 						decimationFactor = compatibleDecimationFactor(decimationFactor, spf)
 						//if the decimation factor is larger than the data slice, then just send one value
 						if decimationFactor > len(dataSlice) {
 							decimationFactor = len(dataSlice)
 						}
-						backend.Logger.Info(fmt.Sprintf("decimation factor in stream of data: %v", decimationFactor))
+						// backend.Logger.Info(fmt.Sprintf("decimation factor in stream of data: %v", decimationFactor))
 						dataSlice = decimate(dataSlice, decimationFactor)
 					}
 					if len(dataSlice) < len(unixTimeSlice) {
-						backend.Logger.Info(fmt.Sprintf("decimating time in stream factor: %v", len(unixTimeSlice)/len(dataSlice)))
+						// backend.Logger.Info(fmt.Sprintf("decimating time in stream factor: %v", len(unixTimeSlice)/len(dataSlice)))
 						unixTimeSlice = decimate(unixTimeSlice, len(unixTimeSlice)/len(dataSlice))
 					} else if len(dataSlice) > len(unixTimeSlice) {
-						backend.Logger.Info(fmt.Sprintf("upsampling time in stream factor: %v, there are %v datapoints", len(dataSlice)/len(unixTimeSlice), len(unixTimeSlice)))
+						// backend.Logger.Info(fmt.Sprintf("upsampling time in stream factor: %v, there are %v datapoints", len(dataSlice)/len(unixTimeSlice), len(unixTimeSlice)))
 						if len(unixTimeSlice) == 1 {
 							//hard to upsample with just one data point, lets grab another one from the past
 							unixTimeSlice = GD_getdata(timeName, d.df, newFrame-2, 2)
 							errStr = GD_error(d.df)
 							if errStr != "" {
 								backend.Logger.Error(fmt.Sprintf("getdata error: %s", errStr))
-								continue
+								return
 							}
 						}
 						unixTimeSlice, err = upsample(unixTimeSlice, len(dataSlice)/len(unixTimeSlice))
 						if err != nil {
-							backend.Logger.Info(fmt.Sprintf("Error upsampling time in stream: %v", err))
-							continue
+							backend.Logger.Error(fmt.Sprintf("Error upsampling time in stream: %v", err))
+							return
 						}
 					}
 				}
-				var timeSlice interface{}
-				if timeType {
-					timeSlice = unixSlice2TimeSlice(unixTimeSlice)
-				} else {
-					timeSlice = unixTimeSlice
-				}
+			}()
 
-				// backend.Logger.Info(fmt.Sprintf("Sending: %v valuesdata, %v values time", len(dataSlice), len(unixTimeSlice)))
-
-				frame := data.NewFrame("response")
-
-				// backend.Logger.Info("made frame")
-				frame.Fields = append(frame.Fields,
-					data.NewField(timeNameField, nil, timeSlice),
-					data.NewField(fieldName, nil, dataSlice),
-				)
-
-				backend.Logger.Info("filled frame")
-
-				d.senderLock.Lock()
-				err = sender.SendFrame(frame, data.IncludeAll)
-				d.senderLock.Unlock()
-				if err != nil {
-					backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
-					continue
-				}
-
-				// backend.Logger.Info("sent frame")
-
-				//debuggg
-				backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
-				//update the last frame
-				d.lastFrame.Store(request.Path, newFrame)
-
-			}
 		}
 	}
 }

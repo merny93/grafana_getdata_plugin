@@ -30,6 +30,21 @@ func unixSlice2TimeSlice(unixTimeSlice []float64) []time.Time {
 	return timeSlice
 }
 
+func indexSlice2TimeSlice(indexSlice []float64, sampleRate float64, lastTime time.Time) []time.Time {
+	timeSlice := make([]time.Time, len(indexSlice))
+	if len(indexSlice) == 0 {
+		return timeSlice
+	}
+	lastIndex := indexSlice[len(indexSlice)-1]
+	for i := 0; i < len(indexSlice); i++ {
+		timeFloat := (indexSlice[i]-lastIndex)/sampleRate + (float64(lastTime.UnixMilli()) / 1e3)
+		timeSlice[i] = time.Unix(int64(timeFloat), int64(math.Mod(timeFloat, 1)*1e9))
+	}
+
+	return timeSlice
+
+}
+
 func upsample(data []float64, upsampleFactor int) ([]float64, error) {
 	if len(data) < 2 {
 		backend.Logger.Info("data length must be at least 2 to upsample")
