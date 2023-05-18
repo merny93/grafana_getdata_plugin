@@ -268,7 +268,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	}
 	if indexConvert {
 		// indexing by index from end now we can convert index into a time object
-		timeSlice = indexSlice2TimeSlice(unixTimeSlice, qm.SampleRate, time.Now())
+		timeSlice = indexSlice2TimeSlice(unixTimeSlice, qm.SampleRate, query.TimeRange.To)
 	} else if qm.TimeType {
 		timeSlice = unixSlice2TimeSlice(unixTimeSlice)
 	} else {
