@@ -295,6 +295,8 @@ func (d *Datasource) SubscribeStream(ctx context.Context, request *backend.Subsc
 }
 
 func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRequest, sender *backend.StreamSender) error {
+
+	var err error
 	// request.Data
 	// Implement data retrieval and streaming logic here
 	backend.Logger.Info("RunStream called")
@@ -320,9 +322,11 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 	backend.Logger.Info(fmt.Sprintf("FROM INSIDE THE STREAM and field: %s", fieldName))
 	defer func() {
 		if r := recover(); r != nil {
+			err = fmt.Errorf("Panic: %v\n%s", r, debug.Stack())
 			backend.Logger.Error("Panic: %v\n%s", r, debug.Stack())
 		} else {
 			backend.Logger.Info("No panic")
+			err = nil
 		}
 	}()
 
@@ -340,7 +344,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 		case <-ctx.Done():
 			backend.Logger.Info(fmt.Sprintf("Context done on stream %s", request.Path))
 			ticker.Stop()
-			return nil
+			return err
 		case <-ticker.C:
 			func() {
 				newFrame = GD_nframes(d.df)
