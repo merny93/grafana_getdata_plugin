@@ -360,10 +360,6 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				sendDataFlag := false
 
 				defer func() {
-					if !sendDataFlag {
-						//dont send data
-						return
-					}
 
 					if sampleRate != 0 {
 						// indexing by index from end now we can convert index into a time object
@@ -380,19 +376,21 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 						data.NewField(fieldName, nil, dataSlice),
 					)
 
-					d.senderLock.Lock()
-					defer d.senderLock.Unlock()
-					err = sender.SendFrame(frame, data.IncludeAll)
-
-					if err != nil {
-						backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
-						return
+					if sendDataFlag {
+						func() {
+							d.senderLock.Lock()
+							defer d.senderLock.Unlock()
+							err = sender.SendFrame(frame, data.IncludeAll)
+							if err != nil {
+								backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
+								return
+							}
+							backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
+						}()
 					}
 
 					//update the last frame
 					d.lastFrame.Store(request.Path, newFrame)
-
-					backend.Logger.Info(fmt.Sprintf("Sent frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
 
 				}()
 
