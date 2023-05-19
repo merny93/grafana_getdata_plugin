@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/master/docs/sources/developers/plugins/plugin.schema.json",
   "type": "datasource",
-  "name": "My Plugin",
-  "id": "simon-myplugin-datasource",
+  "name": "Dirfile (getdata) Datasource",
+  "id": "simon-dirfile-datasource",
   "metrics": true,
   "backend": true,
   "executable": "gpx_my_plugin",
