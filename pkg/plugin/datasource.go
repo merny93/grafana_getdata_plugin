@@ -357,7 +357,14 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				var dataSlice []float64
 				frame := data.NewFrame("response")
 
+				sendDataFlag := false
+
 				defer func() {
+					if !sendDataFlag {
+						//dont send data
+						return
+					}
+
 					if sampleRate != 0 {
 						// indexing by index from end now we can convert index into a time object
 						// backend.Logger.Info("comparing a float to an int worked shockingly", sampleRate)
@@ -390,7 +397,7 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				}()
 
 				if newFrame <= lastFrame {
-					backend.Logger.Info("No new data, sending empty frame")
+					backend.Logger.Info(fmt.Sprintf("No new data on channel %s", request.Path))
 					return
 				}
 				//new data
@@ -459,6 +466,8 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 						}
 					}
 				}
+				//if we made it to here send data
+				sendDataFlag = true
 			}()
 
 		}
