@@ -134,16 +134,14 @@ func (d *Datasource) RunStream(ctx context.Context, request *backend.RunStreamRe
 				data.NewField(sr.fieldName, nil, dataSlice),
 			)
 
-			func() {
-				d.senderLock.Lock()
-				defer d.senderLock.Unlock()
-				err = sender.SendFrame(frame, data.IncludeAll)
-				if err != nil {
-					backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
-					return
-				}
-				backend.Logger.Info(fmt.Sprintf("Sending frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
-			}()
+			d.senderLock.Lock()
+			err = sender.SendFrame(frame, data.IncludeAll)
+			d.senderLock.Unlock()
+			if err != nil {
+				backend.Logger.Info(fmt.Sprintf("Error sending frame: %v", err))
+				return err
+			}
+			backend.Logger.Info(fmt.Sprintf("Sending frame on endpoint: %s with %v values", request.Path, len(dataSlice)))
 
 			//update the last frame
 			d.lastFrame.Store(request.Path, newFrame)
