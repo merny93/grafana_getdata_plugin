@@ -1,5 +1,7 @@
 package plugin
 
+import "time"
+
 type InitSettings struct {
 	DatabaseLocation string `json:"path"` //this specifies how to unmarshal
 }
@@ -21,4 +23,13 @@ type AutocompleteRequest struct {
 
 type AutocompleteResponse struct {
 	MatchList []string
+}
+
+type StreamRequest struct {
+	fieldName     string
+	timeNameField string
+	timeName      string
+	interval      time.Duration
+	timeType      bool
+	sampleRate    float64
 }

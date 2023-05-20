@@ -10,12 +10,9 @@ package plugin
 import "C"
 
 import (
-	"fmt"
-	"runtime/debug"
+	"errors"
 	"sync"
 	"unsafe"
-
-	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 type GD_dirfile *C.DIRFILE
@@ -34,14 +31,14 @@ func GD_open(dir_file_name string) Dirfile {
 	return Dirfile{df: df, mutex: &sync.Mutex{}}
 }
 
-func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []float64 {
+func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) ([]float64, error) {
 	//i got rid of sample calles cause i dont think we need them and not sure what to do with them anyways...
 	//same as GD_getdata_ but gets the size by computing the size from spf and nframes
 	//also it does not need the mutex cause the subcalls have it
 
 	if num_frames <= 0 {
 		//this is weird, lets not think about it
-		return nil
+		return nil, errors.New("num_frames must be greater than 0")
 	}
 
 	spf := GD_spf(df, field_name)
@@ -49,7 +46,7 @@ func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []fl
 
 	//if the first frame is out of bounds, return nil
 	if first_frame >= nframes-1 {
-		return nil
+		return nil, errors.New("first_frame is out of bounds")
 	}
 
 	//get number of frames to read
@@ -64,18 +61,13 @@ func GD_getdata(field_name string, df Dirfile, first_frame, num_frames int) []fl
 	field_name_c := C.CString(field_name)
 	defer C.free(unsafe.Pointer(field_name_c))
 
-	defer df.mutex.Unlock()
 	df.mutex.Lock()
-
-	defer func() {
-		if r := recover(); r != nil {
-			backend.Logger.Error("Recovered in GD_getdata", r, debug.Stack())
-		}
-	}()
-
 	C.gd_getdata(df.df, field_name_c, C.long(first_frame), 0, C.ulong(num_frames), 0, C.GD_FLOAT64, unsafe.Pointer(&res[0]))
+	df.mutex.Unlock()
 
-	return res
+	err := GD_error(df)
+
+	return res, err
 }
 
 func GD_getdata_c(field_name string, df Dirfile, first_frame, first_sample, num_frames, num_samples int, result []float64) int {
@@ -142,13 +134,13 @@ func GD_match_entries(df Dirfile, regexString string) []string {
 
 }
 
-func GD_error(df Dirfile) string {
+func GD_error(df Dirfile) error {
 
 	defer (df.mutex).Unlock()
 	(df.mutex).Lock()
 
 	if C.gd_error(df.df) == 0 {
-		return ""
+		return nil
 	}
 
 	errorSringPointer := C.gd_error_string(df.df, nil, 0)
@@ -160,8 +152,7 @@ func GD_error(df Dirfile) string {
 	// In this case, buflen is ignored. This string will be allocated on the caller's heap and should be deallocated by the caller when no longer needed.
 	C.free(unsafe.Pointer(errorSringPointer))
 
-	fmt.Println("Error code: ", errorStringGo)
-	return errorStringGo
+	return errors.New(errorStringGo)
 }
 
 func GD_nframes(df Dirfile) int {

@@ -2,13 +2,19 @@ package plugin
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
 
 func decimate(data []float64, decimationFactor int) []float64 {
+	if decimationFactor > len(data) {
+		decimationFactor = len(data)
+	}
 	resultSize := int(len(data) / int(decimationFactor))
 	dataTmp := make([]float64, resultSize)
 
@@ -84,4 +90,45 @@ func compatibleDecimationFactor(decimationFactor int, spf int) int {
 	}
 	return decimationFactor
 
+}
+
+func encodeChan(UID, fieldName, interval, timeName string, timeType bool, sampleRateSend float64) string {
+	channelName := fmt.Sprintf("ds/%s/steam/%s/%s/%s/%t/%.3f", UID, fieldName, interval, timeName, timeType, sampleRateSend)
+	return channelName
+}
+
+func decodeChan(path string) (sr StreamRequest, err error) {
+	// var sr StreamRequest
+	// var err error
+	// get the name of the name of the field, held in path as stream/NameOfField
+	chunks := strings.Split(path, "/")
+	sr.fieldName = chunks[1]
+	sr.timeNameField = chunks[3]
+	sr.timeName = strings.Split(sr.timeNameField, "__")[0]
+	sr.interval, err = time.ParseDuration(chunks[2])
+	if err != nil {
+		return
+	}
+	sr.timeType, err = strconv.ParseBool(chunks[4])
+	if err != nil {
+		return
+	}
+	sr.sampleRate, err = strconv.ParseFloat(chunks[5], 64)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func getdata_double(df Dirfile, timeName string, fieldName string, firstFrame int, numFrames int) ([]float64, []float64, error) {
+	// grab the data and error check
+	dataSlice, err := GD_getdata(fieldName, df, int(firstFrame), numFrames)
+	if err != nil {
+		return nil, nil, err
+	}
+	unixTimeSlice, err := GD_getdata(timeName, df, int(firstFrame), numFrames)
+	if err != nil {
+		return nil, nil, err
+	}
+	return dataSlice, unixTimeSlice, nil
 }
