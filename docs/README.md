@@ -20,7 +20,7 @@ Grafana is the data-visualization tool of choice for [Simon's Observatory](https
 
 ## GetData Plugin
 
-The GetData plugin runs on the backend (computer serving the Grafana resources) and is able to return data from a Dirfile in responce to custom *queries*. Users are able to generate these *queries* from the Grafana UI and combine *queries* to build *dashboards*. The plugin is able to serve historical data queried either by any time field or by the reserved `INDEX` field. It is also able to enter *streaming* mode in which it will send new data via `web-sockets` as it becomes available. The plugin performs decimation automatically on the backend resulting in excellent performance: querying millions of points does not produce any perceivable delay.
+The GetData plugin runs on the backend (computer serving the Grafana resources) and is able to return data from a Dirfile in response to custom *queries*. Users are able to generate these *queries* from the Grafana UI and combine *queries* to build *dashboards*. The plugin is able to serve historical data queried either by any time field or by the reserved `INDEX` field. It is also able to enter *streaming* mode in which it will send new data via `web-sockets` as it becomes available. The plugin performs decimation automatically on the backend resulting in excellent performance: querying millions of points does not produce any perceivable delay.
 
 ## Install and Requirements
 
