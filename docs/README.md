@@ -4,7 +4,7 @@ A Grafana plugin which supports the [Dirfile standard](https://getdata.sourcefor
 
 | Query sample | Dashboard sample |
 | ------------ | ---------------- |
-| ![query sample](assets/query_bit.png \| width = 100) | ![dashboard sample](assets/dashboard_bit.png \| width = 100) |
+| <img src="assets/query_bit.png" width = "720"> | <img src="assets/dashboard_bit.png" width = "720"> |
 
 ## Motivations
 
