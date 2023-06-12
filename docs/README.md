@@ -2,6 +2,10 @@
 
 A Grafana plugin which supports the [Dirfile standard](https://getdata.sourceforge.net/dirfile.html) through the reference [GetData implementation](https://github.com/ketiltrout/getdata). This is a [backend datasource plugin](https://grafana.com/docs/grafana/latest/developers/plugins/backend/) which support [streaming](https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-live/) (a new feature rolled out in Grafana 8.0).
 
+| Query sample | Dashboard sample |
+| ------------ | ---------------- |
+| ![query sample](assets/query_bit.png | width = 100) | ![dashboard sample](assets/dashboard_bit.png | width = 100) |
+
 ## Motivations
 
 The Dirfile standard is often used in situation where live data viewing is required such as cryogenics or flight operations for scientific balloon observatories. Currently, to view live data an enterprising scientist has to run a script, known as the `defile` script, which converts an incoming (usually web) stream of binary data into a valid Dirfile and then plot the data using [KST](https://kst-plot.kde.org/). To add further complications, many experiments have designed GUIs to communicate with `defile`. All of these programs were designed to build in Ubuntu and while there exist worked examples of running the software stack in WSL this is clunky and difficult. Finally, the current structure requires everyone to maintain a local copy of the dataset with no provision to sync up old data implying that it is impossible to plot data which was streamed before the local `defile` was run.
@@ -17,9 +21,6 @@ Grafana is the data-visualization tool of choice for [Simon's Observatory](https
 ## GetData Plugin
 
 The GetData plugin runs on the backend (computer serving the Grafana resources) and is able to return data from a Dirfile to respond to custom *queries*. Users are able to generate these *queries* from the Grafana UI and combine queries to build *dashboards*. The plugin is able to serve historical data queried either by any time field or by the reserved `INDEX` field. It is also able to enter *streaming* mode in which it will send new data via `web-sockets` as it becomes available. The plugin performs decimation automatically on the backend resulting in excellent performance: querying millions of points does not result in any perceivable delay.
-
-| Query sample | Dashboard sample |
-| ![query sample](assets/query_bit.png) | ![dashboard sample](assets/dashboard_bit.png) |
 
 ## Install and Requirements
 
